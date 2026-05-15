@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer, BarChart2, Archive } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 function Button({ children, className = "", variant = "default", ...props }) {
   const base = "inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-50";
   const variants = {
@@ -25,6 +26,7 @@ function CardContent({ children, className = "" }) {
 }
 
 const STORAGE_KEY = "courier-check-v1";
+const ARCHIVE_KEY = "courier-stats-archive-v1";
 
 const CHECKS = [
   {
@@ -175,6 +177,17 @@ export default function CourierCheckApp() {
   const [activeCourierId, setActiveCourierId] = useState(null);
   const [query, setQuery] = useState("");
   const [showReport, setShowReport] = useState(false);
+  const [activeTab, setActiveTab] = useState("check"); // "check" | "stats"
+  const [archive, setArchive] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ARCHIVE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive));
+  }, [archive]);
 
   useEffect(() => {
     try {
@@ -245,6 +258,26 @@ export default function CourierCheckApp() {
     if (activeCourierId === courierId) setActiveCourierId(null);
   }
 
+  function archiveAndReset() {
+    if (inspection.couriers.length === 0) {
+      alert("Nejsou žádní kurýři k archivaci.");
+      return;
+    }
+    const confirmed = window.confirm(`Archivovat tuto kontrolu (${inspection.couriers.length} kurýrů) a začít novou?`);
+    if (!confirmed) return;
+    setArchive((prev) => [...prev, { ...inspection, archivedAt: new Date().toISOString() }]);
+    setInspection({
+      date: todayISO(),
+      depot: inspection.depot,
+      inspector: inspection.inspector,
+      shift: inspection.shift,
+      note: "",
+      couriers: [],
+    });
+    setActiveCourierId(null);
+    setShowReport(false);
+  }
+
   function resetInspection() {
     const confirmed = window.confirm("Opravdu chceš začít novou kontrolu? Aktuální data se smažou z tohoto zařízení.");
     if (!confirmed) return;
@@ -290,7 +323,9 @@ export default function CourierCheckApp() {
           .print-only { display: block !important; }
           body { background: white !important; }
           .report-card { box-shadow: none !important; border: none !important; }
-          @page { margin: 16mm; }
+          @page { size: A4 landscape; margin: 10mm; }
+          table { font-size: 9pt !important; }
+          th, td { padding: 3pt 5pt !important; }
         }
         .print-only { display: none; }
       `}</style>
@@ -306,20 +341,46 @@ export default function CourierCheckApp() {
                 <p className="text-sm text-slate-500">Servisní kříže, vratky, vozidlo, uniforma</p>
               </div>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={addCourier} className="rounded-2xl">
-                <Plus className="mr-2 h-4 w-4" /> Přidat kurýra
-              </Button>
-              <Button onClick={() => setShowReport(true)} variant="outline" className="rounded-2xl">
-                <FileText className="mr-2 h-4 w-4" /> Náhled reportu
-              </Button>
-              <Button onClick={printReport} variant="outline" className="rounded-2xl">
-                <Printer className="mr-2 h-4 w-4" /> PDF / tisk
-              </Button>
+            {/* TABS */}
+            <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-100 p-1">
+              <button
+                onClick={() => setActiveTab("check")}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${activeTab === "check" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}
+              >
+                <ClipboardCheck className="h-4 w-4" /> Kontrola
+              </button>
+              <button
+                onClick={() => setActiveTab("stats")}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}
+              >
+                <BarChart2 className="h-4 w-4" /> Statistiky
+                {archive.length > 0 && <span className="rounded-full bg-slate-950 text-white text-xs px-1.5 py-0.5">{archive.length}</span>}
+              </button>
             </div>
+            {activeTab === "check" && (
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button onClick={addCourier} className="rounded-2xl">
+                  <Plus className="mr-2 h-4 w-4" /> Přidat kurýra
+                </Button>
+                <Button onClick={() => setShowReport(true)} variant="outline" className="rounded-2xl">
+                  <FileText className="mr-2 h-4 w-4" /> Náhled reportu
+                </Button>
+                <Button onClick={printReport} variant="outline" className="rounded-2xl">
+                  <Printer className="mr-2 h-4 w-4" /> PDF / tisk
+                </Button>
+                <Button onClick={archiveAndReset} variant="outline" className="rounded-2xl border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                  <Archive className="mr-2 h-4 w-4" /> Archivovat a nová
+                </Button>
+              </div>
+            )}
           </div>
         </header>
 
+        {activeTab === "stats" ? (
+          <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 no-print">
+            <StatsView archive={archive} onClearArchive={() => { if(window.confirm("Opravdu smazat celý archiv statistik?")) setArchive([]); }} />
+          </main>
+        ) : (
         <main className="mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[390px_1fr] print:block print:max-w-none print:p-0">
           <aside className="no-print space-y-5">
             <Card className="rounded-3xl border-slate-200 shadow-sm">
@@ -449,6 +510,7 @@ export default function CourierCheckApp() {
             <PrintableReport inspection={inspection} summary={summary} />
           </section>
         </main>
+        )}
       </div>
   );
 }
@@ -716,6 +778,236 @@ function ReportView({ inspection, summary, onPrint }) {
           <PrintableReport inspection={inspection} summary={summary} />
         </CardContent>
       </Card>
+  );
+}
+
+function StatsView({ archive, onClearArchive }) {
+  const [rangeWeeks, setRangeWeeks] = useState(8);
+
+  const stats = useMemo(() => {
+    if (archive.length === 0) return null;
+
+    // Flatten all couriers from all inspections
+    const allEntries = archive.flatMap((insp) =>
+      insp.couriers.map((c) => ({ ...c, inspectionDate: insp.date, inspectionId: insp.archivedAt }))
+    );
+
+    // Per courier stats
+    const courierMap = {};
+    allEntries.forEach((c) => {
+      const key = c.name?.trim() || "Neznámý";
+      if (!courierMap[key]) courierMap[key] = { name: key, total: 0, issues: 0, fail: 0, checks: {} };
+      const m = courierMap[key];
+      m.total += 1;
+      const result = getCourierResult(c);
+      if (result.tone !== "ok") m.issues += 1;
+      if (result.tone === "fail") m.fail += 1;
+      CHECKS.forEach((ch) => {
+        if (!m.checks[ch.id]) m.checks[ch.id] = 0;
+        if (c.checks?.[ch.id]?.status !== "ok") m.checks[ch.id] += 1;
+      });
+    });
+
+    // Per route stats
+    const routeMap = {};
+    allEntries.forEach((c) => {
+      const key = c.route?.trim() || "Bez trasy";
+      if (!routeMap[key]) routeMap[key] = { route: key, total: 0, issues: 0 };
+      routeMap[key].total += 1;
+      if (getCourierResult(c).tone !== "ok") routeMap[key].issues += 1;
+    });
+
+    // Per check type overall
+    const checkCounts = CHECKS.map((ch) => ({
+      name: ch.short,
+      pocet: allEntries.filter((c) => c.checks?.[ch.id]?.status !== "ok").length,
+    }));
+
+    // Trend: group by week (last N weeks)
+    const now = new Date();
+    const weeks = Array.from({ length: rangeWeeks }, (_, i) => {
+      const start = new Date(now);
+      start.setDate(now.getDate() - (rangeWeeks - 1 - i) * 7);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      const label = `${start.getDate()}.${start.getMonth() + 1}.`;
+      const inspInWeek = archive.filter((insp) => {
+        const d = new Date(insp.date);
+        return d >= start && d <= end;
+      });
+      const totalC = inspInWeek.reduce((s, insp) => s + insp.couriers.length, 0);
+      const issueC = inspInWeek.reduce((s, insp) =>
+        s + insp.couriers.filter((c) => getCourierResult(c).tone !== "ok").length, 0);
+      return { label, checked: totalC, issues: issueC, inspections: inspInWeek.length };
+    });
+
+    const topCouriers = Object.values(courierMap)
+      .map((c) => ({ ...c, issueRate: c.total > 0 ? Math.round((c.issues / c.total) * 100) : 0 }))
+      .sort((a, b) => b.issues - a.issues)
+      .slice(0, 10);
+
+    const topRoutes = Object.values(routeMap)
+      .map((r) => ({ ...r, issueRate: r.total > 0 ? Math.round((r.issues / r.total) * 100) : 0 }))
+      .sort((a, b) => b.issues - a.issues)
+      .slice(0, 10);
+
+    return { topCouriers, topRoutes, checkCounts, weeks, total: archive.length, totalCouriers: allEntries.length };
+  }, [archive, rangeWeeks]);
+
+  if (archive.length === 0) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100">
+          <BarChart2 className="h-8 w-8 text-slate-400" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold">Zatím žádná archivovaná data</h2>
+          <p className="mt-2 max-w-md text-slate-500">
+            Po každé kontrole klikni na <strong>"Archivovat a nová"</strong> — data se uloží a budou se tu zobrazovat statistiky.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* HEADER */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold">Statistiky a trendy</h2>
+          <p className="text-slate-500">Z {stats.total} archivovaných kontrol · {stats.totalCouriers} zkontrolovaných kurýrů</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+            Trend:
+            <select
+              value={rangeWeeks}
+              onChange={(e) => setRangeWeeks(Number(e.target.value))}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm outline-none"
+            >
+              <option value={4}>4 týdny</option>
+              <option value={8}>8 týdnů</option>
+              <option value={12}>12 týdnů</option>
+              <option value={26}>26 týdnů</option>
+            </select>
+          </label>
+          <button onClick={onClearArchive} className="text-xs text-slate-400 hover:text-rose-500 transition">
+            Smazat archiv
+          </button>
+        </div>
+      </div>
+
+      {/* TREND CHART */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">Trend — počet výhrad v čase</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={stats.weeks}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="checked" name="Kontrolováno" stroke="#94a3b8" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="issues" name="Výhrady" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* NEJCASTEJSI CHYBY */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">Nejčastější typy chyb</h3>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={stats.checkCounts} layout="vertical">
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
+            <Tooltip />
+            <Bar dataKey="pocet" name="Počet" fill="#f59e0b" radius={[0, 6, 6, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* TOP KURYRI */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold">Kurýři s nejvíce výhradami</h3>
+          <div className="space-y-2">
+            {stats.topCouriers.map((c, i) => (
+              <div key={c.name} className="flex items-center gap-3">
+                <span className="w-5 text-xs font-bold text-slate-400">{i + 1}.</span>
+                <span className="w-32 truncate text-sm font-semibold">{c.name}</span>
+                <div className="flex-1 rounded-full bg-slate-100 h-2.5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-amber-400 transition-all"
+                    style={{ width: `${stats.topCouriers[0].issues > 0 ? (c.issues / stats.topCouriers[0].issues) * 100 : 0}%` }}
+                  />
+                </div>
+                <span className="w-16 text-right text-xs text-slate-500">{c.issues}× / {c.total} ({c.issueRate}%)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* TOP TRASY */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold">Trasy s nejvíce výhradami</h3>
+          <div className="space-y-2">
+            {stats.topRoutes.map((r, i) => (
+              <div key={r.route} className="flex items-center gap-3">
+                <span className="w-5 text-xs font-bold text-slate-400">{i + 1}.</span>
+                <span className="w-20 truncate text-sm font-semibold">{r.route}</span>
+                <div className="flex-1 rounded-full bg-slate-100 h-2.5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-rose-400 transition-all"
+                    style={{ width: `${stats.topRoutes[0].issues > 0 ? (r.issues / stats.topRoutes[0].issues) * 100 : 0}%` }}
+                  />
+                </div>
+                <span className="w-16 text-right text-xs text-slate-500">{r.issues}× / {r.total} ({r.issueRate}%)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ARCHIV */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">Archiv kontrol</h3>
+        <div className="overflow-hidden rounded-xl border border-slate-200">
+          <table className="w-full border-collapse text-sm text-left">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">Datum</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">Depo</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">Kontrolující</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">Směna</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Kurýrů</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Výhrad</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">% OK</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...archive].reverse().map((insp, i) => {
+                const ok = insp.couriers.filter((c) => getCourierResult(c).tone === "ok").length;
+                const pct = insp.couriers.length > 0 ? Math.round((ok / insp.couriers.length) * 100) : 100;
+                return (
+                  <tr key={insp.archivedAt} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                    <td className="border-b border-slate-100 px-3 py-2">{formatDate(insp.date)}</td>
+                    <td className="border-b border-slate-100 px-3 py-2">{insp.depot}</td>
+                    <td className="border-b border-slate-100 px-3 py-2">{insp.inspector}</td>
+                    <td className="border-b border-slate-100 px-3 py-2">{insp.shift}</td>
+                    <td className="border-b border-slate-100 px-3 py-2 text-center font-bold">{insp.couriers.length}</td>
+                    <td className="border-b border-slate-100 px-3 py-2 text-center font-bold text-amber-600">{insp.couriers.length - ok}</td>
+                    <td className={`border-b border-slate-100 px-3 py-2 text-center font-bold ${pct >= 80 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600"}`}>{pct}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
