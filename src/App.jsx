@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, FolderOpen, ChevronDown } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, FolderOpen, ChevronDown } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 
 function Button({ children, className = "", variant = "default", size = "md", ...props }) {
@@ -37,9 +37,8 @@ const CHECKS = [
 ];
 
 const STATUS_OPTIONS = [
-  { value: "ok", label: "V pořádku", icon: CheckCircle2, weight: 0 },
-  { value: "warning", label: "Výhrada", icon: AlertTriangle, weight: 1 },
-  { value: "fail", label: "Nevyhovuje", icon: XCircle, weight: 2 },
+  { value: "ok", label: "Vyhovuje", icon: CheckCircle2, weight: 0 },
+  { value: "fail", label: "Nevyhovuje", icon: XCircle, weight: 1 },
 ];
 const ACTION_OPTIONS = ["Bez opatření","Kurýr upozorněn","Kurýr proškolen","Opraveno na místě","Opakovaná kontrola","Předat vedoucímu"];
 const UNIFORM_ITEMS = ["Triko","Košile","Kraťasy/Kalhoty","Vesta","Bunda"];
@@ -60,21 +59,18 @@ function getCourierScore(courier) {
 function getCourierResult(courier) {
   const s = getCourierScore(courier);
   if (s === 0) return { label: "Vyhověl", tone: "ok" };
-  if (s <= 3) return { label: "Vyhověl s výhradou", tone: "warning" };
   return { label: "Nevyhověl", tone: "fail" };
 }
 function statusClasses(v) {
   if (v === "ok") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (v === "warning") return "border-amber-200 bg-amber-50 text-amber-800";
   return "border-rose-200 bg-rose-50 text-rose-800";
 }
 function resultClasses(tone) {
   if (tone === "ok") return "bg-emerald-100 text-emerald-800 border-emerald-200";
-  if (tone === "warning") return "bg-amber-100 text-amber-800 border-amber-200";
   return "bg-rose-100 text-rose-800 border-rose-200";
 }
 function computeSummary(couriers) {
-  const base = { total: couriers.length, ok: 0, warning: 0, fail: 0, actions: {}, issues: {} };
+  const base = { total: couriers.length, ok: 0, fail: 0, actions: {}, issues: {} };
   couriers.forEach(c => {
     const r = getCourierResult(c);
     base[r.tone] += 1;
@@ -519,7 +515,6 @@ function StatsPrintable({ archive }) {
 function PrintableReport({ inspection, summary }) {
   const sym = (status) => {
     if (status === "ok") return { s: "✓", cls: "text-emerald-700 font-bold" };
-    if (status === "warning") return { s: "⚠", cls: "text-amber-600 font-bold" };
     return { s: "✗", cls: "text-rose-600 font-bold" };
   };
   const couriersWithNotes = inspection.couriers.filter(c => CHECKS.some(ch => c.checks?.[ch.id]?.note) || c.generalNote);
@@ -540,10 +535,10 @@ function PrintableReport({ inspection, summary }) {
       </div>
 
       <div className="grid grid-cols-4 gap-2">
-        {[{ label: "Kontrolováno", value: summary.total, cls: "border-slate-300" }, { label: "✓ Vyhovělo", value: summary.ok, cls: "border-emerald-300 bg-emerald-50" }, { label: "⚠ S výhradou", value: summary.warning, cls: "border-amber-300 bg-amber-50" }, { label: "✗ Nevyhověl", value: summary.fail, cls: "border-rose-300 bg-rose-50" }].map(s => (
+        {[{ label: "Kontrolováno", value: summary.total, cls: "border-slate-300" }, { label: "✓ Vyhovělo", value: summary.ok, cls: "border-emerald-300 bg-emerald-50" }, { label: "✗ Nevyhověl", value: summary.fail, cls: "border-rose-300 bg-rose-50" }].map(s => (
           <div key={s.label} className={`border rounded-xl p-2 text-center ${s.cls}`}>
-            <div className="text-2xl font-black">{s.value}</div>
-            <div className="text-xs font-semibold text-slate-600">{s.label}</div>
+            <div className="text-2xl font-bold">{s.value}</div>
+            <div className="text-xs font-medium text-slate-600">{s.label}</div>
           </div>
         ))}
       </div>
@@ -572,7 +567,7 @@ function PrintableReport({ inspection, summary }) {
                     <td className="border-b border-slate-200 px-2 py-1.5">{courier.route || "—"}</td>
                     <td className="border-b border-slate-200 px-2 py-1.5">{courier.vehicle || "—"}</td>
                     {CHECKS.map(ch => { const { s, cls } = sym(courier.checks?.[ch.id]?.status || "ok"); return <td key={ch.id} className={`border-b border-slate-200 px-1.5 py-1.5 text-center ${cls}`}>{s}</td>; })}
-                    <td className={`border-b border-slate-200 px-2 py-1.5 text-center font-bold ${result.tone === "ok" ? "text-emerald-700" : result.tone === "warning" ? "text-amber-600" : "text-rose-600"}`}>{result.label}</td>
+                    <td className={`border-b border-slate-200 px-2 py-1.5 text-center font-bold ${result.tone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{result.label}</td>
                     <td className="border-b border-slate-200 px-2 py-1.5">{courier.action}</td>
                   </tr>
                 );
@@ -583,7 +578,7 @@ function PrintableReport({ inspection, summary }) {
       </div>
 
       <div className="flex flex-wrap gap-4 text-xs text-slate-500">
-        <span><strong className="text-emerald-700">✓</strong> V pořádku</span><span><strong className="text-amber-600">⚠</strong> Výhrada</span><span><strong className="text-rose-600">✗</strong> Nevyhovuje</span>
+        <span><strong className="text-emerald-700">✓</strong> V pořádku</span><span><strong className="text-rose-600">✗</strong> Nevyhovuje</span>
         <span className="ml-auto italic">Serv. kříže · Vrácené balíky · Čistota vozidla · Uniforma · Stav vozidla</span>
       </div>
 
@@ -918,7 +913,6 @@ export default function CourierCheckApp() {
             </Card>
             <div className="grid grid-cols-3 gap-3">
               <StatCard label="Celkem" value={summary.total} />
-              <StatCard label="Výhrady" value={summary.warning} />
               <StatCard label="Nevyhověl" value={summary.fail} />
             </div>
             <Card className="rounded-3xl border-slate-200 shadow-sm">
