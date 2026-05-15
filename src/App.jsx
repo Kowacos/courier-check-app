@@ -734,7 +734,6 @@ export default function CourierCheckApp() {
   }
 
   // Automaticky přidej/aktualizuj aktuální kontrolu v draftech při každé změně (jen pokud má id)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!inspection.id) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -795,55 +794,87 @@ export default function CourierCheckApp() {
       </AnimatePresence>
 
       <header className="print-hide-on-print sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm">
-              <ClipboardCheck className="h-6 w-6" />
+        {/* ── ŘÁDEK 1: Logo + Navigace + Rozpracované ── */}
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 pt-3 pb-2 sm:px-6">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm">
+              <ClipboardCheck className="h-5 w-5" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Kontrola kurýrů</h1>
-              <p className="text-sm text-slate-500">Servisní kříže, vratky, vozidlo, uniforma</p>
+            <div className="hidden sm:block">
+              <h1 className="text-lg font-bold tracking-tight leading-tight">Kontrola kurýrů</h1>
+              <p className="text-xs text-slate-400 leading-tight">Servisní kříže · vratky · vozidlo · uniforma</p>
             </div>
+            <h1 className="sm:hidden text-base font-bold tracking-tight">Kurýři</h1>
           </div>
+
+          {/* Tab přepínač — uprostřed */}
           <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-100 p-1">
-            <button onClick={() => setActiveTab("check")} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${activeTab === "check" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
-              <ClipboardCheck className="h-4 w-4" /> Kontrola
-              {isEditingArchived && <span className="rounded-full bg-amber-400 text-white text-xs px-1.5 py-0.5">archiv</span>}
+            <button onClick={() => setActiveTab("check")}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "check" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              <ClipboardCheck className="h-4 w-4" />
+              <span className="hidden xs:inline">Kontrola</span>
+              {isEditingArchived && <span className="rounded-full bg-amber-400 text-white text-xs px-1.5 py-0.5 hidden sm:inline">archiv</span>}
             </button>
-            <button onClick={() => setActiveTab("stats")} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
-              <BarChart2 className="h-4 w-4" /> Statistiky
+            <button onClick={() => setActiveTab("stats")}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              <BarChart2 className="h-4 w-4" />
+              <span className="hidden xs:inline">Statistiky</span>
               {archive.length > 0 && <span className="rounded-full bg-slate-950 text-white text-xs px-1.5 py-0.5">{archive.length}</span>}
             </button>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* Tlačítko Rozpracované — vždy viditelné */}
+          <button onClick={() => setShowDrafts(cur => !cur)}
+            className="relative flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-200 transition shrink-0">
+            <FolderOpen className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Rozpracované</span>
+            {drafts.length > 0 && (
+              <span className="rounded-full bg-rose-500 text-white text-xs h-5 w-5 flex items-center justify-center">{drafts.length}</span>
+            )}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDrafts ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+
+        {/* ── ŘÁDEK 2: Akční tlačítka ── */}
+        {(activeTab === "check" || (activeTab === "stats" && archive.length > 0)) && (
+          <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 pb-3 sm:px-6 flex-wrap">
             {activeTab === "check" && (
               <>
-                <Button onClick={addCourier}><Plus className="mr-2 h-4 w-4" /> Přidat kurýra</Button>
-                <Button variant="outline" onClick={() => setPrintModal({ type: "inspection", inspection, archive: null })}>
-                  <FileText className="mr-2 h-4 w-4" /> Report
+                <Button onClick={addCourier} size="sm">
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  <span>Přidat kurýra</span>
                 </Button>
-                <Button variant="outline" onClick={() => setPrintModal({ type: "uniform", inspection, archive: null })}>
-                  <Shirt className="mr-2 h-4 w-4" /> Uniformy
+                <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "inspection", inspection, archive: null })}>
+                  <FileText className="h-3.5 w-3.5 mr-1.5" />
+                  <span className="hidden sm:inline">Report kontroly</span>
+                  <span className="sm:hidden">Report</span>
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "uniform", inspection, archive: null })}>
+                  <Shirt className="h-3.5 w-3.5 mr-1.5" />
+                  <span className="hidden sm:inline">Objednávka uniforem</span>
+                  <span className="sm:hidden">Uniformy</span>
                 </Button>
                 {isEditingArchived
-                  ? <Button variant="success" onClick={saveEditedBackToArchive}><Save className="mr-2 h-4 w-4" /> Uložit do archivu</Button>
-                  : <Button variant="success" onClick={archiveAndReset}><Archive className="mr-2 h-4 w-4" /> Archivovat a nová</Button>}
+                  ? <Button variant="success" size="sm" onClick={saveEditedBackToArchive}>
+                      <Save className="h-3.5 w-3.5 mr-1.5" />
+                      <span className="hidden sm:inline">Uložit do archivu</span>
+                      <span className="sm:hidden">Uložit</span>
+                    </Button>
+                  : <Button variant="success" size="sm" onClick={archiveAndReset}>
+                      <Archive className="h-3.5 w-3.5 mr-1.5" />
+                      <span className="hidden sm:inline">Archivovat a nová</span>
+                      <span className="sm:hidden">Archivovat</span>
+                    </Button>}
               </>
             )}
             {activeTab === "stats" && archive.length > 0 && (
-              <Button variant="outline" onClick={() => setPrintModal({ type: "stats", inspection: null, archive })}>
-                <Printer className="mr-2 h-4 w-4" /> PDF statistik
+              <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "stats", inspection: null, archive })}>
+                <Printer className="h-3.5 w-3.5 mr-1.5" /> PDF statistik
               </Button>
             )}
-            <button onClick={() => setShowDrafts(cur => !cur)} className="relative rounded-2xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">
-              <FolderOpen className="mr-2 h-4 w-4" /> Rozpracované
-              {drafts.length > 0 && (
-                <span className="absolute -top-1 -right-1 rounded-full bg-rose-500 text-white text-xs h-5 w-5 flex items-center justify-center">{drafts.length}</span>
-              )}
-              <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showDrafts ? "rotate-180" : ""}`} />
-            </button>
           </div>
-        </div>
+        )}
       </header>
 
       {activeTab === "stats" ? (
