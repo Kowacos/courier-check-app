@@ -134,7 +134,7 @@ function createEmptyCourier() {
     checks: emptyChecks(),
     action: "Bez opatření",
     generalNote: "",
-    uniformDetails: { size: "", pantsSize: "", missing: [] },
+    uniformDetails: { size: "", pantsSize: "", missing: [], needsReorder: false },
     createdAt: new Date().toISOString(),
   };
 }
@@ -165,6 +165,20 @@ function resultClasses(tone) {
   return "bg-rose-100 text-rose-800 border-rose-200";
 }
 
+function computeSummary(couriers) {
+  const base = { total: couriers.length, ok: 0, warning: 0, fail: 0, actions: {}, issues: {} };
+  couriers.forEach((courier) => {
+    const result = getCourierResult(courier);
+    base[result.tone] += 1;
+    base.actions[courier.action] = (base.actions[courier.action] || 0) + 1;
+    CHECKS.forEach((check) => {
+      const status = courier.checks?.[check.id]?.status || "ok";
+      if (status !== "ok") base.issues[check.short] = (base.issues[check.short] || 0) + 1;
+    });
+  });
+  return base;
+}
+
 export default function CourierCheckApp() {
   const [inspection, setInspection] = useState(() => ({
     date: todayISO(),
@@ -178,6 +192,7 @@ export default function CourierCheckApp() {
   const [query, setQuery] = useState("");
   const [showReport, setShowReport] = useState(false);
   const [activeTab, setActiveTab] = useState("check"); // "check" | "stats"
+  const [archivePrintTarget, setArchivePrintTarget] = useState(null);
   const [archive, setArchive] = useState(() => {
     try {
       const saved = localStorage.getItem(ARCHIVE_KEY);
@@ -315,6 +330,14 @@ export default function CourierCheckApp() {
     setTimeout(() => window.print(), 150);
   }
 
+  function printArchiveInspection(insp) {
+    setArchivePrintTarget(insp);
+    setTimeout(() => {
+      window.print();
+      setArchivePrintTarget(null);
+    }, 200);
+  }
+
   return (
       <div className="min-h-screen bg-slate-100 text-slate-950 print:bg-white">
         <style>{`
@@ -378,7 +401,11 @@ export default function CourierCheckApp() {
 
         {activeTab === "stats" ? (
           <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 no-print">
-            <StatsView archive={archive} onClearArchive={() => { if(window.confirm("Opravdu smazat celý archiv statistik?")) setArchive([]); }} />
+            <StatsView
+              archive={archive}
+              onClearArchive={() => { if(window.confirm("Opravdu smazat celý archiv statistik?")) setArchive([]); }}
+              onPrintInspection={printArchiveInspection}
+            />
           </main>
         ) : (
         <main className="mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[390px_1fr] print:block print:max-w-none print:p-0">
@@ -507,7 +534,15 @@ export default function CourierCheckApp() {
           </section>
 
           <section className="print-only">
-            <PrintableReport inspection={inspection} summary={summary} />
+            {archivePrintTarget ? (
+              <PrintableReport
+                inspection={archivePrintTarget}
+                summary={computeSummary(archivePrintTarget.couriers)}
+                showUniform={false}
+              />
+            ) : (
+              <PrintableReport inspection={inspection} summary={summary} showUniform={true} />
+            )}
           </section>
         </main>
         )}
@@ -631,6 +666,96 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
                     })}
                   </div>
 
+                  {/* Sekce objednávky uniformy — zobrazí se vždy, nezávisle na statusu */}
+                  {check.id === "uniform" && (
+                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-700">🧥 Evidence uniformy</p>
+                        <button
+                          onClick={() => updateCourier(courier.id, (c) => ({
+                            ...c,
+                            uniformDetails: { ...c.uniformDetails, needsReorder: !c.uniformDetails?.needsReorder }
+                          }))}
+                          className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                            courier.uniformDetails?.needsReorder
+                              ? "border-blue-400 bg-blue-500 text-white"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"
+                          }`}
+                        >
+                          {courier.uniformDetails?.needsReorder ? "✓ Potřebuje doplnit zásobu" : "+ Potřebuje doplnit zásobu"}
+                        </button>
+                      </div>
+
+                      {courier.uniformDetails?.needsReorder && value === "ok" && (
+                        <p className="rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700">
+                          ℹ️ <strong>Nezapočítává se do chyb</strong> — kurýr uniformu má, jen potřebuje doplnit zásobu.
+                        </p>
+                      )}
+                      {value !== "ok" && (
+                        <p className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">
+                          ⚠️ <strong>Započítává se do chyb</strong> — kurýr uniformu nemá nebo je nevyhovující.
+                        </p>
+                      )}
+
+                      {(value !== "ok" || courier.uniformDetails?.needsReorder) && (
+                        <div className="space-y-3 pt-1">
+                          <div className="flex flex-wrap gap-2">
+                            {UNIFORM_ITEMS.map((item) => {
+                              const checked = courier.uniformDetails?.missing?.includes(item);
+                              return (
+                                <button
+                                  key={item}
+                                  onClick={() => updateCourier(courier.id, (c) => {
+                                    const current = c.uniformDetails?.missing || [];
+                                    const next = checked ? current.filter((i) => i !== item) : [...current, item];
+                                    return { ...c, uniformDetails: { ...c.uniformDetails, missing: next } };
+                                  })}
+                                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                                    checked
+                                      ? value !== "ok"
+                                        ? "border-rose-500 bg-rose-500 text-white"
+                                        : "border-blue-500 bg-blue-500 text-white"
+                                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"
+                                  }`}
+                                >
+                                  {checked ? "✓ " : ""}{item}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-4">
+                            <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                              Velikost (oblečení):
+                              <select
+                                value={courier.uniformDetails?.size || ""}
+                                onChange={(e) => updateCourier(courier.id, (c) => ({
+                                  ...c, uniformDetails: { ...c.uniformDetails, size: e.target.value }
+                                }))}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base outline-none focus:border-slate-400"
+                              >
+                                <option value="">— vyberte —</option>
+                                {UNIFORM_SIZES.map((s) => <option key={s}>{s}</option>)}
+                              </select>
+                            </label>
+                            <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                              Velikost kalhot/kraťasů:
+                              <select
+                                value={courier.uniformDetails?.pantsSize || ""}
+                                onChange={(e) => updateCourier(courier.id, (c) => ({
+                                  ...c, uniformDetails: { ...c.uniformDetails, pantsSize: e.target.value }
+                                }))}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base outline-none focus:border-slate-400"
+                              >
+                                <option value="">— vyberte —</option>
+                                {UNIFORM_PANTS_SIZES.map((s) => <option key={s}>{s}</option>)}
+                              </select>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {value !== "ok" && (
                       <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
                         <div className="flex flex-wrap gap-2">
@@ -644,61 +769,6 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
                               </button>
                           ))}
                         </div>
-                        {check.id === "uniform" && (
-                          <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                            <p className="text-sm font-semibold text-amber-800">🧥 Detail chybějící výbavy</p>
-                            <div className="flex flex-wrap gap-2">
-                              {UNIFORM_ITEMS.map((item) => {
-                                const checked = courier.uniformDetails?.missing?.includes(item);
-                                return (
-                                  <button
-                                    key={item}
-                                    onClick={() => updateCourier(courier.id, (c) => {
-                                      const current = c.uniformDetails?.missing || [];
-                                      const next = checked ? current.filter((i) => i !== item) : [...current, item];
-                                      return { ...c, uniformDetails: { ...c.uniformDetails, missing: next } };
-                                    })}
-                                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
-                                      checked
-                                        ? "border-amber-500 bg-amber-500 text-white"
-                                        : "border-slate-200 bg-white text-slate-700 hover:border-amber-400"
-                                    }`}
-                                  >
-                                    {checked ? "✓ " : ""}{item}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-4">
-                              <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                                Velikost (oblečení):
-                                <select
-                                  value={courier.uniformDetails?.size || ""}
-                                  onChange={(e) => updateCourier(courier.id, (c) => ({
-                                    ...c, uniformDetails: { ...c.uniformDetails, size: e.target.value }
-                                  }))}
-                                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base outline-none focus:border-slate-400"
-                                >
-                                  <option value="">— vyberte —</option>
-                                  {UNIFORM_SIZES.map((s) => <option key={s}>{s}</option>)}
-                                </select>
-                              </label>
-                              <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                                Velikost kalhot/kraťasů:
-                                <select
-                                  value={courier.uniformDetails?.pantsSize || ""}
-                                  onChange={(e) => updateCourier(courier.id, (c) => ({
-                                    ...c, uniformDetails: { ...c.uniformDetails, pantsSize: e.target.value }
-                                  }))}
-                                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base outline-none focus:border-slate-400"
-                                >
-                                  <option value="">— vyberte —</option>
-                                  {UNIFORM_PANTS_SIZES.map((s) => <option key={s}>{s}</option>)}
-                                </select>
-                              </label>
-                            </div>
-                          </div>
-                        )}
                         <textarea
                             value={note}
                             onChange={(event) =>
@@ -781,7 +851,7 @@ function ReportView({ inspection, summary, onPrint }) {
   );
 }
 
-function StatsView({ archive, onClearArchive }) {
+function StatsView({ archive, onClearArchive, onPrintInspection }) {
   const [rangeWeeks, setRangeWeeks] = useState(8);
 
   const stats = useMemo(() => {
@@ -985,6 +1055,7 @@ function StatsView({ archive, onClearArchive }) {
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Kurýrů</th>
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Výhrad</th>
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">% OK</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">PDF</th>
               </tr>
             </thead>
             <tbody>
@@ -1000,6 +1071,15 @@ function StatsView({ archive, onClearArchive }) {
                     <td className="border-b border-slate-100 px-3 py-2 text-center font-bold">{insp.couriers.length}</td>
                     <td className="border-b border-slate-100 px-3 py-2 text-center font-bold text-amber-600">{insp.couriers.length - ok}</td>
                     <td className={`border-b border-slate-100 px-3 py-2 text-center font-bold ${pct >= 80 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600"}`}>{pct}%</td>
+                    <td className="border-b border-slate-100 px-3 py-2 text-center">
+                      <button
+                        onClick={() => onPrintInspection(insp)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-slate-400 hover:bg-slate-50 transition"
+                        title="Tisk / PDF"
+                      >
+                        <Printer className="h-3.5 w-3.5" /> PDF
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -1011,7 +1091,7 @@ function StatsView({ archive, onClearArchive }) {
   );
 }
 
-function PrintableReport({ inspection, summary }) {
+function PrintableReport({ inspection, summary, showUniform = true }) {
   const statusSymbol = (status) => {
     if (status === "ok") return { sym: "✓", cls: "text-emerald-700 font-bold text-center" };
     if (status === "warning") return { sym: "⚠", cls: "text-amber-600 font-bold text-center" };
@@ -1158,10 +1238,14 @@ function PrintableReport({ inspection, summary }) {
       )}
 
       {/* OBJEDNÁVKA UNIFOREM */}
-      {(() => {
+      {showUniform && (() => {
         const uniformIssues = inspection.couriers.filter(
-          (c) => c.checks?.uniform?.status !== "ok" &&
-            ((c.uniformDetails?.missing?.length > 0) || c.uniformDetails?.size)
+          (c) =>
+            (c.checks?.uniform?.status !== "ok" && c.uniformDetails?.missing?.length > 0) ||
+            (c.uniformDetails?.needsReorder && c.uniformDetails?.missing?.length > 0) ||
+            c.uniformDetails?.size || c.uniformDetails?.pantsSize
+        ).filter(
+          (c) => c.checks?.uniform?.status !== "ok" || c.uniformDetails?.needsReorder
         );
         if (uniformIssues.length === 0) return null;
         return (
@@ -1173,6 +1257,7 @@ function PrintableReport({ inspection, summary }) {
                   <tr>
                     <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-left">Kurýr</th>
                     <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-left">Trasa</th>
+                    <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-center">Typ</th>
                     <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-center">Vel. oblečení</th>
                     <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-center">Vel. kalhot</th>
                     {UNIFORM_ITEMS.map((item) => (
@@ -1185,6 +1270,12 @@ function PrintableReport({ inspection, summary }) {
                     <tr key={courier.id} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50/40"}>
                       <td className="border-b border-amber-100 px-2 py-1.5 font-medium">{courier.name || "Bez jména"}</td>
                       <td className="border-b border-amber-100 px-2 py-1.5">{courier.route || "—"}</td>
+                      <td className="border-b border-amber-100 px-2 py-1.5 text-center">
+                        {courier.checks?.uniform?.status !== "ok"
+                          ? <span className="rounded-full bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 text-xs font-bold">Chybí</span>
+                          : <span className="rounded-full bg-blue-100 text-blue-700 border border-blue-200 px-2 py-0.5 text-xs font-bold">Doplnit</span>
+                        }
+                      </td>
                       <td className="border-b border-amber-100 px-2 py-1.5 text-center font-bold">
                         {courier.uniformDetails?.size || <span className="text-slate-400 font-normal italic">—</span>}
                       </td>
@@ -1204,7 +1295,7 @@ function PrintableReport({ inspection, summary }) {
                 </tbody>
                 <tfoot className="bg-amber-50">
                   <tr>
-                    <td colSpan={4} className="px-2 py-1.5 text-xs font-semibold text-slate-600">Celkový počet kusů k objednání:</td>
+                    <td colSpan={5} className="px-2 py-1.5 text-xs font-semibold text-slate-600">Celkový počet kusů k objednání:</td>
                     {UNIFORM_ITEMS.map((item) => {
                       const count = uniformIssues.filter((c) => c.uniformDetails?.missing?.includes(item)).length;
                       return (
