@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer, Edit3 } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer } from "lucide-react";
 function Button({ children, className = "", variant = "default", ...props }) {
   const base = "inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-50";
   const variants = {
@@ -119,6 +119,10 @@ function emptyChecks() {
   }, {});
 }
 
+const UNIFORM_ITEMS = ["Triko", "Košile", "Kraťasy/Kalhoty", "Vesta", "Bunda"];
+const UNIFORM_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "3XL"];
+const UNIFORM_PANTS_SIZES = ["30", "32", "34", "36", "38", "40", "42", "44", "46"];
+
 function createEmptyCourier() {
   return {
     id: crypto.randomUUID(),
@@ -128,6 +132,7 @@ function createEmptyCourier() {
     checks: emptyChecks(),
     action: "Bez opatření",
     generalNote: "",
+    uniformDetails: { size: "", pantsSize: "", missing: [] },
     createdAt: new Date().toISOString(),
   };
 }
@@ -144,10 +149,6 @@ function getCourierResult(courier) {
   if (score === 0) return { label: "Vyhověl", tone: "ok" };
   if (score <= 3) return { label: "Vyhověl s výhradou", tone: "warning" };
   return { label: "Nevyhověl", tone: "fail" };
-}
-
-function statusLabel(value) {
-  return STATUS_OPTIONS.find((item) => item.value === value)?.label || "V pořádku";
 }
 
 function statusClasses(value) {
@@ -581,6 +582,61 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
                               </button>
                           ))}
                         </div>
+                        {check.id === "uniform" && (
+                          <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                            <p className="text-sm font-semibold text-amber-800">🧥 Detail chybějící výbavy</p>
+                            <div className="flex flex-wrap gap-2">
+                              {UNIFORM_ITEMS.map((item) => {
+                                const checked = courier.uniformDetails?.missing?.includes(item);
+                                return (
+                                  <button
+                                    key={item}
+                                    onClick={() => updateCourier(courier.id, (c) => {
+                                      const current = c.uniformDetails?.missing || [];
+                                      const next = checked ? current.filter((i) => i !== item) : [...current, item];
+                                      return { ...c, uniformDetails: { ...c.uniformDetails, missing: next } };
+                                    })}
+                                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                                      checked
+                                        ? "border-amber-500 bg-amber-500 text-white"
+                                        : "border-slate-200 bg-white text-slate-700 hover:border-amber-400"
+                                    }`}
+                                  >
+                                    {checked ? "✓ " : ""}{item}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-4">
+                              <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                                Velikost (oblečení):
+                                <select
+                                  value={courier.uniformDetails?.size || ""}
+                                  onChange={(e) => updateCourier(courier.id, (c) => ({
+                                    ...c, uniformDetails: { ...c.uniformDetails, size: e.target.value }
+                                  }))}
+                                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base outline-none focus:border-slate-400"
+                                >
+                                  <option value="">— vyberte —</option>
+                                  {UNIFORM_SIZES.map((s) => <option key={s}>{s}</option>)}
+                                </select>
+                              </label>
+                              <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                                Velikost kalhot/kraťasů:
+                                <select
+                                  value={courier.uniformDetails?.pantsSize || ""}
+                                  onChange={(e) => updateCourier(courier.id, (c) => ({
+                                    ...c, uniformDetails: { ...c.uniformDetails, pantsSize: e.target.value }
+                                  }))}
+                                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base outline-none focus:border-slate-400"
+                                >
+                                  <option value="">— vyberte —</option>
+                                  {UNIFORM_PANTS_SIZES.map((s) => <option key={s}>{s}</option>)}
+                                </select>
+                              </label>
+                            </div>
+                          </div>
+                        )}
                         <textarea
                             value={note}
                             onChange={(event) =>
@@ -664,121 +720,223 @@ function ReportView({ inspection, summary, onPrint }) {
 }
 
 function PrintableReport({ inspection, summary }) {
-  const couriersWithIssues = inspection.couriers.filter((courier) => getCourierScore(courier) > 0 || courier.generalNote);
+  const statusSymbol = (status) => {
+    if (status === "ok") return { sym: "✓", cls: "text-emerald-700 font-bold text-center" };
+    if (status === "warning") return { sym: "⚠", cls: "text-amber-600 font-bold text-center" };
+    return { sym: "✗", cls: "text-rose-600 font-bold text-center" };
+  };
+
+  const couriersWithNotes = inspection.couriers.filter((c) =>
+    CHECKS.some((ch) => c.checks?.[ch.id]?.note) || c.generalNote
+  );
 
   return (
-      <div className="space-y-6 bg-white text-slate-950 print:text-black">
-        <div className="border-b border-slate-300 pb-4">
-          <h1 className="text-3xl font-black tracking-tight">Report kontroly kurýrů</h1>
-          <div className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
-            <div><strong>Datum:</strong> {formatDate(inspection.date)}</div>
-            <div><strong>Depo / hala:</strong> {inspection.depot}</div>
-            <div><strong>Kontrolující osoba:</strong> {inspection.inspector}</div>
-            <div><strong>Směna:</strong> {inspection.shift}</div>
-          </div>
-          {inspection.note && <p className="mt-3 text-sm"><strong>Poznámka:</strong> {inspection.note}</p>}
+    <div className="space-y-4 bg-white text-slate-950 text-sm print:text-black">
+
+      {/* HLAVIČKA */}
+      <div className="flex justify-between items-start border-b-2 border-slate-800 pb-3">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight">Report kontroly kurýrů</h1>
+          <p className="text-slate-500 text-xs mt-0.5">Automaticky generováno · {formatDate(inspection.date)}</p>
         </div>
+        <div className="text-right text-xs text-slate-600 space-y-0.5">
+          <div><strong>Depo:</strong> {inspection.depot}</div>
+          <div><strong>Kontrolující:</strong> {inspection.inspector}</div>
+          <div><strong>Směna:</strong> {inspection.shift}</div>
+          {inspection.note && <div className="max-w-xs"><strong>Pozn.:</strong> {inspection.note}</div>}
+        </div>
+      </div>
 
-        <section>
-          <h2 className="mb-3 text-xl font-bold">Souhrn</h2>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <ReportStat label="Kontrolováno" value={summary.total} />
-            <ReportStat label="Vyhovělo" value={summary.ok} />
-            <ReportStat label="S výhradou" value={summary.warning} />
-            <ReportStat label="Nevyhovělo" value={summary.fail} />
+      {/* STATISTIKY */}
+      <div className="grid grid-cols-4 gap-2">
+        {[
+          { label: "Kontrolováno", value: summary.total, cls: "border-slate-300" },
+          { label: "✓ Vyhovělo", value: summary.ok, cls: "border-emerald-300 bg-emerald-50" },
+          { label: "⚠ S výhradou", value: summary.warning, cls: "border-amber-300 bg-amber-50" },
+          { label: "✗ Nevyhovělo", value: summary.fail, cls: "border-rose-300 bg-rose-50" },
+        ].map((s) => (
+          <div key={s.label} className={`border rounded-xl p-2 text-center ${s.cls}`}>
+            <div className="text-2xl font-black">{s.value}</div>
+            <div className="text-xs font-semibold text-slate-600">{s.label}</div>
           </div>
-        </section>
+        ))}
+      </div>
 
-        <section>
-          <h2 className="mb-3 text-xl font-bold">Nejčastější nedostatky</h2>
-          {Object.keys(summary.issues).length === 0 ? (
-              <p className="rounded-2xl border border-slate-200 p-3 text-sm">Nebyl zaznamenán žádný nedostatek.</p>
-          ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {Object.entries(summary.issues).map(([name, count]) => (
-                    <div key={name} className="flex justify-between rounded-2xl border border-slate-200 p-3 text-sm">
-                      <span>{name}</span>
-                      <strong>{count}×</strong>
-                    </div>
-                ))}
-              </div>
-          )}
-        </section>
-
-        <section>
-          <h2 className="mb-3 text-xl font-bold">Přehled kurýrů</h2>
-          <div className="overflow-hidden rounded-2xl border border-slate-300">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-slate-100">
+      {/* HLAVNÍ TABULKA */}
+      <div>
+        <h2 className="text-base font-bold mb-1.5">Přehled kurýrů</h2>
+        <div className="overflow-hidden rounded-xl border border-slate-300">
+          <table className="w-full border-collapse text-left text-xs">
+            <thead className="bg-slate-100">
               <tr>
-                <th className="border-b border-slate-300 p-2">Kurýr</th>
-                <th className="border-b border-slate-300 p-2">Trasa</th>
-                <th className="border-b border-slate-300 p-2">Vozidlo</th>
-                <th className="border-b border-slate-300 p-2">Výsledek</th>
-                <th className="border-b border-slate-300 p-2">Opatření</th>
+                <th className="border-b border-slate-300 px-2 py-1.5 font-semibold">Kurýr</th>
+                <th className="border-b border-slate-300 px-2 py-1.5 font-semibold">Trasa</th>
+                <th className="border-b border-slate-300 px-2 py-1.5 font-semibold">Vozidlo</th>
+                {CHECKS.map((ch) => (
+                  <th key={ch.id} className="border-b border-slate-300 px-1.5 py-1.5 font-semibold text-center">
+                    {ch.short}
+                  </th>
+                ))}
+                <th className="border-b border-slate-300 px-2 py-1.5 font-semibold text-center">Výsledek</th>
+                <th className="border-b border-slate-300 px-2 py-1.5 font-semibold">Opatření</th>
               </tr>
-              </thead>
-              <tbody>
-              {inspection.couriers.map((courier) => {
+            </thead>
+            <tbody>
+              {inspection.couriers.length === 0 && (
+                <tr>
+                  <td colSpan={3 + CHECKS.length + 2} className="p-3 text-center text-slate-400 italic">
+                    Žádný kurýr nebyl přidán.
+                  </td>
+                </tr>
+              )}
+              {inspection.couriers.map((courier, idx) => {
                 const result = getCourierResult(courier);
+                const rowBg = idx % 2 === 0 ? "bg-white" : "bg-slate-50";
                 return (
-                    <tr key={courier.id}>
-                      <td className="border-b border-slate-200 p-2 font-medium">{courier.name || "Bez jména"}</td>
-                      <td className="border-b border-slate-200 p-2">{courier.route || "-"}</td>
-                      <td className="border-b border-slate-200 p-2">{courier.vehicle || "-"}</td>
-                      <td className="border-b border-slate-200 p-2">{result.label}</td>
-                      <td className="border-b border-slate-200 p-2">{courier.action}</td>
-                    </tr>
+                  <tr key={courier.id} className={rowBg}>
+                    <td className="border-b border-slate-200 px-2 py-1.5 font-medium">{courier.name || "Bez jména"}</td>
+                    <td className="border-b border-slate-200 px-2 py-1.5">{courier.route || "—"}</td>
+                    <td className="border-b border-slate-200 px-2 py-1.5">{courier.vehicle || "—"}</td>
+                    {CHECKS.map((ch) => {
+                      const status = courier.checks?.[ch.id]?.status || "ok";
+                      const { sym, cls } = statusSymbol(status);
+                      return (
+                        <td key={ch.id} className={`border-b border-slate-200 px-1.5 py-1.5 ${cls}`}>
+                          {sym}
+                        </td>
+                      );
+                    })}
+                    <td className={`border-b border-slate-200 px-2 py-1.5 text-center text-xs font-bold ${
+                      result.tone === "ok" ? "text-emerald-700" :
+                      result.tone === "warning" ? "text-amber-600" : "text-rose-600"
+                    }`}>
+                      {result.label}
+                    </td>
+                    <td className="border-b border-slate-200 px-2 py-1.5">{courier.action}</td>
+                  </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* LEGENDA */}
+      <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+        <span><strong className="text-emerald-700">✓</strong> V pořádku</span>
+        <span><strong className="text-amber-600">⚠</strong> Výhrada</span>
+        <span><strong className="text-rose-600">✗</strong> Nevyhovuje</span>
+        <span className="ml-auto italic">Sloupce: Serv. kříže · Vrácené balíky · Čistota vozidla · Uniforma · Stav vozidla</span>
+      </div>
+
+      {/* POZNÁMKY — jen pokud existují */}
+      {couriersWithNotes.length > 0 && (
+        <div>
+          <h2 className="text-base font-bold mb-1.5">Poznámky k výhradám</h2>
+          <div className="overflow-hidden rounded-xl border border-slate-300">
+            <table className="w-full border-collapse text-xs">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="border-b border-slate-300 px-2 py-1.5 font-semibold w-32 text-left">Kurýr</th>
+                  <th className="border-b border-slate-300 px-2 py-1.5 font-semibold w-32 text-left">Kontrolní bod</th>
+                  <th className="border-b border-slate-300 px-2 py-1.5 font-semibold text-left">Poznámka</th>
+                </tr>
+              </thead>
+              <tbody>
+                {couriersWithNotes.flatMap((courier) => [
+                  ...CHECKS.filter((ch) => courier.checks?.[ch.id]?.note).map((ch) => (
+                    <tr key={courier.id + ch.id} className="odd:bg-white even:bg-slate-50">
+                      <td className="border-b border-slate-200 px-2 py-1 font-medium">{courier.name || "Bez jména"}</td>
+                      <td className="border-b border-slate-200 px-2 py-1">{ch.short}</td>
+                      <td className="border-b border-slate-200 px-2 py-1 whitespace-pre-wrap">{courier.checks[ch.id].note}</td>
+                    </tr>
+                  )),
+                  ...(courier.generalNote ? [
+                    <tr key={courier.id + "_gen"} className="odd:bg-white even:bg-slate-50">
+                      <td className="border-b border-slate-200 px-2 py-1 font-medium">{courier.name || "Bez jména"}</td>
+                      <td className="border-b border-slate-200 px-2 py-1 italic text-slate-500">Obecná</td>
+                      <td className="border-b border-slate-200 px-2 py-1 whitespace-pre-wrap">{courier.generalNote}</td>
+                    </tr>
+                  ] : []),
+                ])}
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      )}
 
-        <section>
-          <h2 className="mb-3 text-xl font-bold">Detail nedostatků</h2>
-          {couriersWithIssues.length === 0 ? (
-              <p className="rounded-2xl border border-slate-200 p-3 text-sm">Všichni kontrolovaní kurýři byli bez výhrad.</p>
-          ) : (
-              <div className="space-y-4">
-                {couriersWithIssues.map((courier) => {
-                  const result = getCourierResult(courier);
-                  return (
-                      <div key={courier.id} className="break-inside-avoid rounded-2xl border border-slate-300 p-4">
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="text-lg font-bold">{courier.name || "Bez jména"}</h3>
-                          <span className="text-sm font-semibold">{result.label} · {courier.action}</span>
-                        </div>
-                        <div className="space-y-2 text-sm">
-                          {CHECKS.map((check) => {
-                            const status = courier.checks?.[check.id]?.status || "ok";
-                            const note = courier.checks?.[check.id]?.note || "";
-                            if (status === "ok" && !note) return null;
-                            return (
-                                <div key={check.id} className="rounded-xl bg-slate-50 p-3">
-                                  <strong>{check.title}:</strong> {statusLabel(status)}
-                                  {note && <div className="mt-1 whitespace-pre-wrap text-slate-700">Poznámka: {note}</div>}
-                                </div>
-                            );
-                          })}
-                          {courier.generalNote && <div className="rounded-xl bg-slate-50 p-3"><strong>Obecná poznámka:</strong> {courier.generalNote}</div>}
-                        </div>
-                      </div>
-                  );
-                })}
-              </div>
-          )}
-        </section>
-      </div>
-  );
-}
+      {/* OBJEDNÁVKA UNIFOREM */}
+      {(() => {
+        const uniformIssues = inspection.couriers.filter(
+          (c) => c.checks?.uniform?.status !== "ok" &&
+            ((c.uniformDetails?.missing?.length > 0) || c.uniformDetails?.size)
+        );
+        if (uniformIssues.length === 0) return null;
+        return (
+          <div>
+            <h2 className="text-base font-bold mb-1.5">🧥 Objednávka uniforem</h2>
+            <div className="overflow-hidden rounded-xl border border-amber-300">
+              <table className="w-full border-collapse text-xs">
+                <thead className="bg-amber-50">
+                  <tr>
+                    <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-left">Kurýr</th>
+                    <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-left">Trasa</th>
+                    <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-center">Vel. oblečení</th>
+                    <th className="border-b border-amber-200 px-2 py-1.5 font-semibold text-center">Vel. kalhot</th>
+                    {UNIFORM_ITEMS.map((item) => (
+                      <th key={item} className="border-b border-amber-200 px-1.5 py-1.5 font-semibold text-center">{item}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {uniformIssues.map((courier, idx) => (
+                    <tr key={courier.id} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50/40"}>
+                      <td className="border-b border-amber-100 px-2 py-1.5 font-medium">{courier.name || "Bez jména"}</td>
+                      <td className="border-b border-amber-100 px-2 py-1.5">{courier.route || "—"}</td>
+                      <td className="border-b border-amber-100 px-2 py-1.5 text-center font-bold">
+                        {courier.uniformDetails?.size || <span className="text-slate-400 font-normal italic">—</span>}
+                      </td>
+                      <td className="border-b border-amber-100 px-2 py-1.5 text-center font-bold">
+                        {courier.uniformDetails?.pantsSize || <span className="text-slate-400 font-normal italic">—</span>}
+                      </td>
+                      {UNIFORM_ITEMS.map((item) => {
+                        const needs = courier.uniformDetails?.missing?.includes(item);
+                        return (
+                          <td key={item} className={`border-b border-amber-100 px-1.5 py-1.5 text-center font-bold ${needs ? "text-rose-600" : "text-slate-300"}`}>
+                            {needs ? "✗" : "·"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-amber-50">
+                  <tr>
+                    <td colSpan={4} className="px-2 py-1.5 text-xs font-semibold text-slate-600">Celkový počet kusů k objednání:</td>
+                    {UNIFORM_ITEMS.map((item) => {
+                      const count = uniformIssues.filter((c) => c.uniformDetails?.missing?.includes(item)).length;
+                      return (
+                        <td key={item} className="px-1.5 py-1.5 text-center font-black text-slate-800">
+                          {count > 0 ? count : <span className="font-normal text-slate-300">—</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
-function ReportStat({ label, value }) {
-  return (
-      <div className="rounded-2xl border border-slate-200 p-3 text-center">
-        <div className="text-2xl font-black">{value}</div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      {/* PODPIS */}
+      <div className="flex justify-between items-end pt-4 border-t border-slate-200 text-xs text-slate-500">
+        <span>Zpracoval: <strong>{inspection.inspector}</strong> · {formatDate(inspection.date)} · Depo: {inspection.depot}</span>
+        <span className="flex flex-col items-center gap-1">
+          <span className="inline-block w-44 border-b border-slate-400" />
+          <span>Podpis kontrolující osoby</span>
+        </span>
       </div>
+    </div>
   );
 }
