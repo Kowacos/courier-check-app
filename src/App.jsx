@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchArchive, insertArchiveEntry, updateArchiveEntry,
+  fetchDrafts, upsertDraft, deleteDraft as deleteDraftFromDB,
+} from "./supabaseService";
 import { motion, AnimatePresence } from "framer-motion";
 import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, FolderOpen, ChevronDown } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
