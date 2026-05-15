@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, AlertTriangle, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, FolderOpen, ChevronDown } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 
 function Button({ children, className = "", variant = "default", size = "md", ...props }) {
@@ -26,6 +26,7 @@ function CardContent({ children, className = "" }) { return <div className={clas
 
 const STORAGE_KEY = "courier-check-v1";
 const ARCHIVE_KEY = "courier-stats-archive-v1";
+const DRAFTS_KEY = "courier-drafts-v1";
 
 const CHECKS = [
   { id: "serviceCrosses", title: "Servisní kříže na balících", short: "Serv. kříže", description: "Kontrola, zda jsou na balících správně vyplněné servisní kříže.", quickNotes: ["Chybějící servisní kříž","Špatně vyplněný servisní kříž","Kurýr proškolen","Opraveno na místě","Nutná opakovaná kontrola"] },
@@ -629,8 +630,13 @@ export default function CourierCheckApp() {
   const [archive, setArchive] = useState(() => {
     try { const s = localStorage.getItem(ARCHIVE_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
   });
+  const [drafts, setDrafts] = useState(() => {
+    try { const s = localStorage.getItem(DRAFTS_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [showDrafts, setShowDrafts] = useState(false);
 
   useEffect(() => { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }, [archive]);
+  useEffect(() => { localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts)); }, [drafts]);
   useEffect(() => {
     try {
       const s = localStorage.getItem(STORAGE_KEY);
@@ -687,6 +693,57 @@ export default function CourierCheckApp() {
       return { ...c, checks: { ...c.checks, [checkId]: { ...(c.checks?.[checkId] || { status: "ok" }), note: cur ? `${cur}\n${text}` : text } } };
     });
   }
+
+  function saveCurrentToDrafts(insp) {
+    // Přidá nebo aktualizuje aktuální kontrolu v seznamu draftů
+    const withId = insp.id ? insp : { ...insp, id: crypto.randomUUID() };
+    setDrafts(cur => {
+      const exists = cur.find(d => d.id === withId.id);
+      if (exists) return cur.map(d => d.id === withId.id ? withId : d);
+      return [withId, ...cur];
+    });
+    return withId;
+  }
+
+  function switchDraft(id) {
+    // Ulož aktuální kontrolu do draftů a přepni na vybranou
+    saveCurrentToDrafts(inspection);
+    const draft = drafts.find(d => d.id === id);
+    if (draft) {
+      setInspection(draft);
+      setActiveCourierId(null);
+      setActiveTab("check");
+      setShowDrafts(false);
+    }
+  }
+
+  function deleteDraft(id) {
+    if (window.confirm("Smazat tuto rozpracovanou kontrolu?")) {
+      setDrafts(cur => cur.filter(d => d.id !== id));
+    }
+  }
+
+  function createNewDraft() {
+    // Ulož aktuální kontrolu a otevři prázdnou novou
+    saveCurrentToDrafts(inspection);
+    const newInsp = { id: crypto.randomUUID(), date: todayISO(), depot: inspection.depot, inspector: inspection.inspector, shift: "Ranní kontrola", note: "", couriers: [], createdAt: new Date().toISOString() };
+    setInspection(newInsp);
+    setActiveCourierId(null);
+    setActiveTab("check");
+    setShowDrafts(false);
+  }
+
+  // Automaticky přidej/aktualizuj aktuální kontrolu v draftech při každé změně (jen pokud má id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!inspection.id) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDrafts(cur => {
+      const exists = cur.find(d => d.id === inspection.id);
+      if (exists) return cur.map(d => d.id === inspection.id ? inspection : d);
+      return cur;
+    });
+  }, [inspection]);
 
   const isEditingArchived = !!inspection.archivedAt;
 
@@ -758,25 +815,34 @@ export default function CourierCheckApp() {
               {archive.length > 0 && <span className="rounded-full bg-slate-950 text-white text-xs px-1.5 py-0.5">{archive.length}</span>}
             </button>
           </div>
-          {activeTab === "check" && (
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={addCourier}><Plus className="mr-2 h-4 w-4" /> Přidat kurýra</Button>
-              <Button variant="outline" onClick={() => setPrintModal({ type: "inspection", inspection, archive: null })}>
-                <FileText className="mr-2 h-4 w-4" /> Report
+          <div className="flex items-center gap-2">
+            {activeTab === "check" && (
+              <>
+                <Button onClick={addCourier}><Plus className="mr-2 h-4 w-4" /> Přidat kurýra</Button>
+                <Button variant="outline" onClick={() => setPrintModal({ type: "inspection", inspection, archive: null })}>
+                  <FileText className="mr-2 h-4 w-4" /> Report
+                </Button>
+                <Button variant="outline" onClick={() => setPrintModal({ type: "uniform", inspection, archive: null })}>
+                  <Shirt className="mr-2 h-4 w-4" /> Uniformy
+                </Button>
+                {isEditingArchived
+                  ? <Button variant="success" onClick={saveEditedBackToArchive}><Save className="mr-2 h-4 w-4" /> Uložit do archivu</Button>
+                  : <Button variant="success" onClick={archiveAndReset}><Archive className="mr-2 h-4 w-4" /> Archivovat a nová</Button>}
+              </>
+            )}
+            {activeTab === "stats" && archive.length > 0 && (
+              <Button variant="outline" onClick={() => setPrintModal({ type: "stats", inspection: null, archive })}>
+                <Printer className="mr-2 h-4 w-4" /> PDF statistik
               </Button>
-              <Button variant="outline" onClick={() => setPrintModal({ type: "uniform", inspection, archive: null })}>
-                <Shirt className="mr-2 h-4 w-4" /> Uniformy
-              </Button>
-              {isEditingArchived
-                ? <Button variant="success" onClick={saveEditedBackToArchive}><Save className="mr-2 h-4 w-4" /> Uložit do archivu</Button>
-                : <Button variant="success" onClick={archiveAndReset}><Archive className="mr-2 h-4 w-4" /> Archivovat a nová</Button>}
-            </div>
-          )}
-          {activeTab === "stats" && archive.length > 0 && (
-            <Button variant="outline" onClick={() => setPrintModal({ type: "stats", inspection: null, archive })}>
-              <Printer className="mr-2 h-4 w-4" /> PDF statistik
-            </Button>
-          )}
+            )}
+            <button onClick={() => setShowDrafts(cur => !cur)} className="relative rounded-2xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">
+              <FolderOpen className="mr-2 h-4 w-4" /> Rozpracované
+              {drafts.length > 0 && (
+                <span className="absolute -top-1 -right-1 rounded-full bg-rose-500 text-white text-xs h-5 w-5 flex items-center justify-center">{drafts.length}</span>
+              )}
+              <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showDrafts ? "rotate-180" : ""}`} />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -864,6 +930,22 @@ export default function CourierCheckApp() {
           </section>
         </main>
       )}
+
+      {/* ─── DRAFT SWITCHER MODAL ───────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showDrafts && (
+          <motion.div key="dm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <DraftSwitcherModal
+              drafts={drafts}
+              currentId={inspection.id}
+              onSwitch={switchDraft}
+              onNew={createNewDraft}
+              onDelete={deleteDraft}
+              onClose={() => setShowDrafts(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1182,3 +1264,71 @@ function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection,
     </div>
   );
 }
+
+// ─── DRAFT SWITCHER MODAL ─────────────────────────────────────────────────────
+function DraftSwitcherModal({ drafts, currentId, onSwitch, onNew, onDelete, onClose }) {
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+        className="relative w-full max-w-lg mx-4 bg-white rounded-3xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-lg font-bold">Rozpracované kontroly</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Přepni mezi rozdělanými kontrolami nebo začni novou</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl p-2 hover:bg-slate-100 transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-4 space-y-2 max-h-[60vh] overflow-auto">
+          {drafts.map(draft => {
+            const isCurrent = draft.id === currentId;
+            const filled = draft.couriers?.length ?? 0;
+            const issues = draft.couriers?.filter(c => getCourierResult(c).tone !== "ok").length ?? 0;
+            return (
+              <div key={draft.id}
+                className={`flex items-center gap-3 rounded-2xl border p-3 transition ${isCurrent ? "border-slate-950 bg-slate-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                <button className="flex-1 text-left" onClick={() => !isCurrent && onSwitch(draft.id)}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm">{formatDate(draft.date) || "Bez data"}</span>
+                    {isCurrent && <span className="rounded-full bg-slate-950 text-white text-xs px-2 py-0.5">aktivní</span>}
+                    {draft.archivedAt && <span className="rounded-full bg-amber-100 text-amber-700 text-xs px-2 py-0.5">z archivu</span>}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {draft.shift} · {draft.depot} · {filled} kurýrů
+                    {issues > 0 && <span className="text-amber-600 ml-1">· {issues} výhrad</span>}
+                  </div>
+                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {!isCurrent && (
+                    <Button size="sm" variant="outline" onClick={() => onSwitch(draft.id)}>
+                      <FolderOpen className="h-3.5 w-3.5 mr-1" /> Otevřít
+                    </Button>
+                  )}
+                  {!isCurrent && (
+                    <button onClick={() => onDelete(draft.id)}
+                      className="rounded-xl p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="px-4 pb-4 pt-2 border-t border-slate-100">
+          <Button onClick={onNew} className="w-full gap-2">
+            <Plus className="h-4 w-4" /> Začít novou prázdnou kontrolu
+          </Button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
