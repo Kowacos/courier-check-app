@@ -97,7 +97,17 @@ function PrintModal({ data, onClose }) {
   const insp = data.inspection;
   const summary = insp ? computeSummary(insp.couriers) : null;
 
-  function handlePrint() { window.print(); }
+  function handlePrint() {
+    // Dynamicky nastav orientaci stránky podle aktivního tabu
+    const isPortrait = tab === "stats";
+    const styleEl = document.createElement("style");
+    styleEl.id = "__print-orientation__";
+    styleEl.textContent = `@page { size: A4 ${isPortrait ? "portrait" : "landscape"}; margin: ${isPortrait ? "12mm" : "10mm"}; }`;
+    document.head.appendChild(styleEl);
+    window.print();
+    // Odstraň po tisku
+    setTimeout(() => { styleEl.remove(); }, 1000);
+  }
 
   const tabs = [
     ...(insp ? [{ id: "inspection", label: "📋 Report kontroly", icon: FileText }] : []),
@@ -108,11 +118,11 @@ function PrintModal({ data, onClose }) {
   return (
     <>
       {/* Screen overlay — skryje se při tisku */}
-      <div className="print-hide-on-print fixed inset-0 z-50 flex flex-col bg-slate-900/60 backdrop-blur-sm">
+      <div className="print-modal-overlay fixed inset-0 z-50 flex flex-col bg-slate-900/60 backdrop-blur-sm">
         {/* Modal window */}
-        <div className="relative m-4 flex flex-col rounded-3xl bg-white shadow-2xl overflow-hidden" style={{ maxHeight: "calc(100vh - 2rem)" }}>
-          {/* Sticky header */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-6 py-4 shrink-0">
+        <div className="print-modal-window relative m-4 flex flex-col rounded-3xl bg-white shadow-2xl overflow-hidden" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+          {/* Sticky header — skryje se při tisku */}
+          <div className="print-modal-controls flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-6 py-4 shrink-0">
             <div className="flex items-center gap-2 flex-wrap">
               {tabs.map(t => (
                 <button key={t.id} onClick={() => setTab(t.id)}
@@ -130,9 +140,9 @@ function PrintModal({ data, onClose }) {
               </Button>
             </div>
           </div>
-          {/* Scrollable preview */}
-          <div className="overflow-auto p-8 bg-white">
-            {tab === "inspection" && insp && <PrintableReport inspection={insp} summary={summary} showUniform={false} />}
+          {/* Scrollable preview — tiskne se přímo toto */}
+          <div className="print-modal-scroll overflow-auto p-8 bg-white">
+            {tab === "inspection" && insp && <PrintableReport inspection={insp} summary={summary} />}
             {tab === "uniform" && insp && <UniformOrderPrintable inspection={insp} />}
             {tab === "stats" && data.archive && <StatsPrintable archive={data.archive} />}
           </div>
@@ -141,7 +151,7 @@ function PrintModal({ data, onClose }) {
 
       {/* Print-only content — skryje se na obrazovce, zobrazí se při tisku */}
       <div className="print-show-only">
-        {tab === "inspection" && insp && <PrintableReport inspection={insp} summary={summary} showUniform={false} />}
+        {tab === "inspection" && insp && <PrintableReport inspection={insp} summary={summary} />}
         {tab === "uniform" && insp && <UniformOrderPrintable inspection={insp} />}
         {tab === "stats" && data.archive && <StatsPrintable archive={data.archive} />}
       </div>
@@ -159,61 +169,74 @@ function UniformOrderPrintable({ inspection }) {
 
   return (
     <div className="space-y-4 bg-white text-slate-950 text-sm">
-      <div className="flex justify-between items-start border-b-2 border-amber-500 pb-3">
+      <div className="flex justify-between items-start pb-3" style={{ borderBottom: "3px solid #f59e0b" }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight">🧥 Objednávka uniforem</h1>
-          <p className="text-slate-500 text-xs mt-0.5">{formatDate(inspection.date)} · Depo: {inspection.depot} · {inspection.inspector}</p>
+          <p className="text-xs mt-0.5" style={{ color: "#64748b" }}>{formatDate(inspection.date)} · Depo: {inspection.depot} · {inspection.inspector}</p>
         </div>
       </div>
       {uniformIssues.length === 0 ? (
-        <p className="italic text-slate-400 text-center py-8">Žádné uniformy k objednání.</p>
+        <p className="text-center py-8" style={{ color: "#94a3b8", fontStyle: "italic" }}>Žádné uniformy k objednání.</p>
       ) : (
         <>
-          <div className="overflow-hidden rounded-xl border border-amber-300">
-            <table className="w-full border-collapse text-xs">
-              <thead className="bg-amber-50">
-                <tr>
-                  <th className="border-b border-amber-200 px-2 py-2 font-semibold text-left">Kurýr</th>
-                  <th className="border-b border-amber-200 px-2 py-2 font-semibold text-left">Trasa</th>
-                  <th className="border-b border-amber-200 px-2 py-2 font-semibold text-center">Typ</th>
-                  <th className="border-b border-amber-200 px-2 py-2 font-semibold text-center">Vel. oblečení</th>
-                  <th className="border-b border-amber-200 px-2 py-2 font-semibold text-center">Vel. kalhot</th>
-                  {UNIFORM_ITEMS.map(item => <th key={item} className="border-b border-amber-200 px-2 py-2 font-semibold text-center">{item}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {uniformIssues.map((courier, idx) => (
-                  <tr key={courier.id} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50/40"}>
-                    <td className="border-b border-amber-100 px-2 py-2 font-medium">{courier.name || "Bez jména"}</td>
-                    <td className="border-b border-amber-100 px-2 py-2">{courier.route || "—"}</td>
-                    <td className="border-b border-amber-100 px-2 py-2 text-center">
-                      {courier.checks?.uniform?.status !== "ok"
-                        ? <span className="rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-xs font-bold">Chybí</span>
-                        : <span className="rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-xs font-bold">Doplnit</span>}
-                    </td>
-                    <td className="border-b border-amber-100 px-2 py-2 text-center font-bold">{courier.uniformDetails?.size || "—"}</td>
-                    <td className="border-b border-amber-100 px-2 py-2 text-center font-bold">{courier.uniformDetails?.pantsSize || "—"}</td>
-                    {UNIFORM_ITEMS.map(item => {
-                      const needs = courier.uniformDetails?.missing?.includes(item);
-                      return <td key={item} className={`border-b border-amber-100 px-2 py-2 text-center font-bold ${needs ? "text-rose-600" : "text-slate-300"}`}>{needs ? "✗" : "·"}</td>;
-                    })}
-                  </tr>
+          <table className="w-full border-collapse text-xs" style={{ border: "1px solid #fcd34d", borderRadius: "8px", overflow: "hidden" }}>
+            <thead style={{ backgroundColor: "#fffbeb" }}>
+              <tr>
+                <th className="px-2 py-2 text-left font-semibold" style={{ borderBottom: "1px solid #fde68a" }}>Kurýr</th>
+                <th className="px-2 py-2 text-left font-semibold" style={{ borderBottom: "1px solid #fde68a" }}>Trasa</th>
+                <th className="px-2 py-2 text-center font-semibold" style={{ borderBottom: "1px solid #fde68a" }}>Typ</th>
+                <th className="px-2 py-2 text-center font-semibold" style={{ borderBottom: "1px solid #fde68a" }}>Vel. oblečení</th>
+                <th className="px-2 py-2 text-center font-semibold" style={{ borderBottom: "1px solid #fde68a" }}>Vel. kalhot</th>
+                {UNIFORM_ITEMS.map(item => (
+                  <th key={item} className="px-2 py-2 text-center font-semibold" style={{ borderBottom: "1px solid #fde68a" }}>{item}</th>
                 ))}
-              </tbody>
-              <tfoot className="bg-amber-50 font-semibold">
-                <tr>
-                  <td colSpan={5} className="px-2 py-2 text-xs">Celkem kusů k objednání:</td>
+              </tr>
+            </thead>
+            <tbody>
+              {uniformIssues.map((courier, idx) => (
+                <tr key={courier.id} style={{ backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fffdf0" }}>
+                  <td className="px-2 py-2 font-medium" style={{ borderBottom: "1px solid #fef3c7" }}>{courier.name || "Bez jména"}</td>
+                  <td className="px-2 py-2" style={{ borderBottom: "1px solid #fef3c7" }}>{courier.route || "—"}</td>
+                  <td className="px-2 py-2 text-center" style={{ borderBottom: "1px solid #fef3c7" }}>
+                    {courier.checks?.uniform?.status !== "ok" ? (
+                      <span style={{ backgroundColor: "#fee2e2", color: "#b91c1c", borderRadius: "9999px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>Chybí</span>
+                    ) : (
+                      <span style={{ backgroundColor: "#dbeafe", color: "#1d4ed8", borderRadius: "9999px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>Doplnit</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-center font-bold" style={{ borderBottom: "1px solid #fef3c7" }}>{courier.uniformDetails?.size || "—"}</td>
+                  <td className="px-2 py-2 text-center font-bold" style={{ borderBottom: "1px solid #fef3c7" }}>{courier.uniformDetails?.pantsSize || "—"}</td>
                   {UNIFORM_ITEMS.map(item => {
-                    const cnt = uniformIssues.filter(c => c.uniformDetails?.missing?.includes(item)).length;
-                    return <td key={item} className="px-2 py-2 text-center font-black text-slate-800">{cnt > 0 ? cnt : "—"}</td>;
+                    const needs = courier.uniformDetails?.missing?.includes(item);
+                    return (
+                      <td key={item} className="px-2 py-2 text-center font-bold" style={{ borderBottom: "1px solid #fef3c7", color: needs ? "#dc2626" : "#cbd5e1" }}>
+                        {needs ? "✗" : "·"}
+                      </td>
+                    );
                   })}
                 </tr>
-              </tfoot>
-            </table>
-          </div>
-          <div className="flex justify-between items-end pt-4 border-t border-slate-200 text-xs text-slate-500">
+              ))}
+            </tbody>
+            <tfoot style={{ backgroundColor: "#fffbeb" }}>
+              <tr>
+                <td colSpan={5} className="px-2 py-2 text-xs font-semibold">Celkem kusů k objednání:</td>
+                {UNIFORM_ITEMS.map(item => {
+                  const cnt = uniformIssues.filter(c => c.uniformDetails?.missing?.includes(item)).length;
+                  return (
+                    <td key={item} className="px-2 py-2 text-center" style={{ fontWeight: 900, color: cnt > 0 ? "#92400e" : "#94a3b8" }}>
+                      {cnt > 0 ? cnt : "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          </table>
+          <div className="flex justify-between items-end pt-4 text-xs" style={{ borderTop: "1px solid #e2e8f0", color: "#64748b" }}>
             <span>Zpracoval: <strong>{inspection.inspector}</strong> · {formatDate(inspection.date)}</span>
-            <span className="flex flex-col items-center gap-1"><span className="inline-block w-44 border-b border-slate-400" /><span>Podpis</span></span>
+            <span className="flex flex-col items-center gap-1">
+              <span className="inline-block w-44" style={{ borderBottom: "1px solid #94a3b8" }} />
+              <span>Podpis</span>
+            </span>
           </div>
         </>
       )}
@@ -226,7 +249,11 @@ function StatsPrintable({ archive }) {
   const allEntries = archive.flatMap(insp => insp.couriers.map(c => ({ ...c, inspectionDate: insp.date })));
   const totalOk = allEntries.filter(c => getCourierResult(c).tone === "ok").length;
   const totalIssues = allEntries.filter(c => getCourierResult(c).tone !== "ok").length;
-  const checkCounts = CHECKS.map(ch => ({ name: ch.short, count: allEntries.filter(c => (c.checks?.[ch.id]?.status || "ok") !== "ok").length }));
+
+  const checkCounts = CHECKS.map(ch => ({
+    name: ch.short,
+    pocet: allEntries.filter(c => (c.checks?.[ch.id]?.status || "ok") !== "ok").length,
+  })).sort((a, b) => b.pocet - a.pocet);
 
   const courierMap = {};
   allEntries.forEach(c => {
@@ -243,109 +270,252 @@ function StatsPrintable({ archive }) {
     if (getCourierResult(c).tone !== "ok") routeMap[k].issues += 1;
   });
 
-  const topCouriers = Object.values(courierMap).sort((a, b) => b.issues - a.issues).slice(0, 15);
-  const topRoutes = Object.values(routeMap).sort((a, b) => b.issues - a.issues).slice(0, 15);
+  const topCouriers = Object.values(courierMap).sort((a, b) => b.issues - a.issues).slice(0, 8);
+  const topRoutes = Object.values(routeMap).sort((a, b) => b.issues - a.issues).slice(0, 8);
+  const sortedArchive = [...archive].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const okTrendData = sortedArchive.map(insp => {
+    const ok = insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
+    const pct = insp.couriers.length > 0 ? Math.round(ok / insp.couriers.length * 100) : 100;
+    const d = new Date(insp.date);
+    return { label: `${d.getDate()}.${d.getMonth() + 1}.`, pctOk: pct };
+  });
+
+  const trendBarData = sortedArchive.slice(-14).map(insp => {
+    const ok = insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
+    const d = new Date(insp.date);
+    return { label: `${d.getDate()}.${d.getMonth() + 1}.`, kontrolovano: insp.couriers.length, vyhrady: insp.couriers.length - ok };
+  });
+
+  const courierChartData = topCouriers.map(c => ({ name: c.name.split(" ")[0], vyhrady: c.issues, celkem: c.total }));
+  const routeChartData = topRoutes.map(r => ({ name: r.route, vyhrady: r.issues, celkem: r.total }));
+
+  const archiveTableData = sortedArchive.map((insp, idx) => {
+    const ok = insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
+    const pct = insp.couriers.length > 0 ? Math.round(ok / insp.couriers.length * 100) : 100;
+    const prev = idx > 0 ? sortedArchive[idx - 1] : null;
+    let prevPct = null;
+    if (prev) {
+      const prevOk = prev.couriers.filter(c => getCourierResult(c).tone === "ok").length;
+      prevPct = prev.couriers.length > 0 ? Math.round(prevOk / prev.couriers.length * 100) : 100;
+    }
+    return { insp, pct, diff: prevPct !== null ? pct - prevPct : null };
+  }).reverse();
+
+  // Styly — společné pomocné funkce
+  const sec = (extra = {}) => ({ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px", ...extra });
+  const th = (extra = {}) => ({ padding: "5px 7px", borderBottom: "2px solid #e2e8f0", fontWeight: 700, backgroundColor: "#f8fafc", fontSize: "10px", textAlign: "left", ...extra });
+  const td = (extra = {}) => ({ padding: "4px 7px", borderBottom: "1px solid #f1f5f9", fontSize: "10px", ...extra });
+  // A4 portrait @96dpi, 12mm margins → ~700px usable; polovina ~336px
+  const FULL = 690;
+  const HALF = 330;
 
   return (
-    <div className="space-y-5 bg-white text-slate-950 text-sm">
-      <div className="border-b-2 border-slate-800 pb-3">
-        <h1 className="text-2xl font-black">Statistický report</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Vygenerováno {formatDate(todayISO())} · {archive.length} kontrol · {allEntries.length} kurýrů celkem</p>
+    <div style={{ fontFamily: "Arial, sans-serif", fontSize: "11px", color: "#0f172a", background: "#fff", width: "100%" }}>
+
+      {/* ── HLAVIČKA ── */}
+      <div style={{ borderBottom: "3px solid #0f172a", paddingBottom: "8px", marginBottom: "14px" }}>
+        <h1 style={{ fontSize: "20px", fontWeight: 900, margin: 0 }}>📊 Statistický report</h1>
+        <p style={{ fontSize: "10px", color: "#64748b", margin: "3px 0 0" }}>
+          Vygenerováno {formatDate(todayISO())} · {archive.length} kontrol · {allEntries.length} kurýrů celkem
+        </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: "Kontrol celkem", value: archive.length, cls: "border-slate-300" },
-          { label: "Kurýrů celkem", value: allEntries.length, cls: "border-slate-300" },
-          { label: "✓ Bez výhrad", value: totalOk, cls: "border-emerald-300 bg-emerald-50" },
-          { label: "⚠ S výhradou", value: totalIssues, cls: "border-amber-300 bg-amber-50" },
-        ].map(s => (
-          <div key={s.label} className={`border rounded-xl p-3 text-center ${s.cls}`}>
-            <div className="text-3xl font-black">{s.value}</div>
-            <div className="text-xs font-semibold text-slate-600">{s.label}</div>
-          </div>
-        ))}
+      {/* ── SOUHRN — 4 dlaždice pomocí tabulky ── */}
+      <table width="100%" cellPadding="0" cellSpacing="0" style={{ marginBottom: "14px", borderCollapse: "separate", borderSpacing: "8px" }}>
+        <tbody><tr>
+          {[
+            { label: "Kontrol celkem", value: archive.length, bg: "#f8fafc", border: "#94a3b8", color: "#0f172a" },
+            { label: "Kurýrů celkem", value: allEntries.length, bg: "#f8fafc", border: "#94a3b8", color: "#0f172a" },
+            { label: "✓ Bez výhrad", value: totalOk, bg: "#f0fdf4", border: "#86efac", color: "#16a34a" },
+            { label: "⚠ S výhradou / nevyhověl", value: totalIssues, bg: "#fffbeb", border: "#fcd34d", color: "#b45309" },
+          ].map(s => (
+            <td key={s.label} width="25%" style={{ backgroundColor: s.bg, border: `2px solid ${s.border}`, borderRadius: "10px", padding: "10px", textAlign: "center", verticalAlign: "middle" }}>
+              <div style={{ fontSize: "24px", fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
+              <div style={{ fontSize: "9px", fontWeight: 700, color: "#475569", marginTop: "4px" }}>{s.label}</div>
+            </td>
+          ))}
+        </tr></tbody>
+      </table>
+
+      {/* ── TREND % OK — plná šířka line chart ── */}
+      <div style={{ ...sec({ border: "2px solid #0f172a", marginBottom: "14px" }) }}>
+        <div style={{ fontSize: "13px", fontWeight: 800, marginBottom: "2px" }}>📈 Trend % OK v čase — zlepšení / zhoršení</div>
+        <div style={{ fontSize: "9px", color: "#64748b", marginBottom: "8px" }}>Čím vyšší křivka, tím lepší výsledky. Cíl: udržet nad 80 %.</div>
+        {okTrendData.length > 1 ? (
+          <LineChart width={FULL} height={140} data={okTrendData} margin={{ top: 4, right: 16, left: -8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="label" tick={{ fontSize: 8 }} />
+            <YAxis domain={[0, 100]} tick={{ fontSize: 8 }} tickFormatter={v => `${v}%`} width={34} />
+            <Tooltip formatter={v => `${v}%`} />
+            <Line type="monotone" dataKey="pctOk" name="% OK" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3, fill: "#16a34a" }} />
+          </LineChart>
+        ) : (
+          <p style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "10px" }}>Potřeba alespoň 2 kontroly pro zobrazení trendu.</p>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        <div>
-          <h2 className="text-base font-bold mb-2">Nejčastější typy chyb</h2>
-          <table className="w-full border-collapse text-xs border border-slate-200 rounded-xl overflow-hidden">
-            <thead className="bg-slate-50"><tr><th className="border-b border-slate-200 px-3 py-1.5 text-left">Kontrolní bod</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">Počet chyb</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">%</th></tr></thead>
-            <tbody>
-              {checkCounts.sort((a,b) => b.count - a.count).map((ch, i) => (
-                <tr key={ch.name} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                  <td className="border-b border-slate-100 px-3 py-1.5 font-medium">{ch.name}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center font-bold text-amber-600">{ch.count}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center">{allEntries.length > 0 ? Math.round(ch.count / allEntries.length * 100) : 0}%</td>
+      {/* ── ŘÁDEK 1: Výhrady v čase | Typy chyb ── */}
+      <table width="100%" cellPadding="0" cellSpacing="0" style={{ marginBottom: "14px" }}>
+        <tbody><tr valign="top">
+          <td width="50%" style={{ paddingRight: "7px" }}>
+            <div style={sec()}>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "8px" }}>Výhrady vs. kontrolováno</div>
+              {trendBarData.length > 0 ? (
+                <BarChart width={HALF} height={140} data={trendBarData} margin={{ top: 2, right: 8, left: -18, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="label" tick={{ fontSize: 7 }} />
+                  <YAxis tick={{ fontSize: 7 }} allowDecimals={false} width={28} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: "8px" }} />
+                  <Bar dataKey="kontrolovano" name="Kontrolováno" fill="#94a3b8" radius={[2,2,0,0]} />
+                  <Bar dataKey="vyhrady" name="Výhrady" fill="#f59e0b" radius={[2,2,0,0]} />
+                </BarChart>
+              ) : <p style={{ color: "#94a3b8", fontSize: "10px" }}>Nedostatek dat.</p>}
+            </div>
+          </td>
+          <td width="50%" style={{ paddingLeft: "7px" }}>
+            <div style={sec()}>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "8px" }}>Nejčastější typy chyb</div>
+              <BarChart width={HALF} height={140} data={checkCounts} layout="vertical" margin={{ top: 2, right: 24, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 7 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 7 }} width={86} />
+                <Tooltip />
+                <Bar dataKey="pocet" name="Počet" fill="#f59e0b" radius={[0,3,3,0]} />
+              </BarChart>
+            </div>
+          </td>
+        </tr></tbody>
+      </table>
+
+      {/* ── ŘÁDEK 2: Top kurýři | Top trasy ── */}
+      <table width="100%" cellPadding="0" cellSpacing="0" style={{ marginBottom: "14px" }}>
+        <tbody><tr valign="top">
+          <td width="50%" style={{ paddingRight: "7px" }}>
+            <div style={sec()}>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "8px" }}>Top kurýři — nejvíce výhrad</div>
+              {courierChartData.length > 0 ? (
+                <BarChart width={HALF} height={160} data={courierChartData} layout="vertical" margin={{ top: 2, right: 24, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 7 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 7 }} width={66} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: "8px" }} />
+                  <Bar dataKey="celkem" name="Celkem" fill="#e2e8f0" radius={[0,3,3,0]} />
+                  <Bar dataKey="vyhrady" name="Výhrady" fill="#f59e0b" radius={[0,3,3,0]} />
+                </BarChart>
+              ) : <p style={{ color: "#94a3b8", fontSize: "10px", fontStyle: "italic" }}>Žádná data.</p>}
+            </div>
+          </td>
+          <td width="50%" style={{ paddingLeft: "7px" }}>
+            <div style={sec()}>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "8px" }}>Top trasy — nejvíce výhrad</div>
+              {routeChartData.length > 0 ? (
+                <BarChart width={HALF} height={160} data={routeChartData} layout="vertical" margin={{ top: 2, right: 24, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 7 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 7 }} width={66} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: "8px" }} />
+                  <Bar dataKey="celkem" name="Celkem" fill="#e2e8f0" radius={[0,3,3,0]} />
+                  <Bar dataKey="vyhrady" name="Výhrady" fill="#f43f5e" radius={[0,3,3,0]} />
+                </BarChart>
+              ) : <p style={{ color: "#94a3b8", fontSize: "10px", fontStyle: "italic" }}>Žádná data.</p>}
+            </div>
+          </td>
+        </tr></tbody>
+      </table>
+
+      {/* ── TABULKY: Historie + Typy chyb ── */}
+      <table width="100%" cellPadding="0" cellSpacing="0">
+        <tbody><tr valign="top">
+
+          {/* Historie kontrol */}
+          <td width="62%" style={{ paddingRight: "7px" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>Historie kontrol — porovnání v čase</div>
+            <table width="100%" cellPadding="0" cellSpacing="0" style={{ borderCollapse: "collapse", border: "1px solid #e2e8f0" }}>
+              <thead>
+                <tr>
+                  {["Datum","Směna","Kurýrů","Výhrad","% OK","Změna"].map(h => (
+                    <th key={h} style={th({ textAlign: h === "Datum" || h === "Směna" ? "left" : "center" })}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {archiveTableData.map(({ insp, pct, diff }, i) => {
+                  const issues = insp.couriers.length - insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
+                  const pctColor = pct >= 80 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626";
+                  const diffEl = diff === null ? "—"
+                    : diff > 0 ? <span style={{ color: "#16a34a", fontWeight: 700 }}>↑ +{diff}%</span>
+                    : diff < 0 ? <span style={{ color: "#dc2626", fontWeight: 700 }}>↓ {diff}%</span>
+                    : <span style={{ color: "#94a3b8" }}>= 0%</span>;
+                  return (
+                    <tr key={insp.archivedAt} style={{ backgroundColor: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                      <td style={td()}>{formatDate(insp.date)}</td>
+                      <td style={td()}>{insp.shift}</td>
+                      <td style={td({ textAlign: "center", fontWeight: 700 })}>{insp.couriers.length}</td>
+                      <td style={td({ textAlign: "center", fontWeight: 700, color: issues > 0 ? "#d97706" : "#16a34a" })}>{issues}</td>
+                      <td style={td({ textAlign: "center", fontWeight: 800, color: pctColor })}>{pct}%</td>
+                      <td style={td({ textAlign: "center" })}>{diffEl}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </td>
 
-        <div>
-          <h2 className="text-base font-bold mb-2">Archiv kontrol</h2>
-          <table className="w-full border-collapse text-xs border border-slate-200 rounded-xl overflow-hidden">
-            <thead className="bg-slate-50"><tr><th className="border-b border-slate-200 px-2 py-1.5 text-left">Datum</th><th className="border-b border-slate-200 px-2 py-1.5 text-left">Směna</th><th className="border-b border-slate-200 px-2 py-1.5 text-center">Kurýrů</th><th className="border-b border-slate-200 px-2 py-1.5 text-center">% OK</th></tr></thead>
-            <tbody>
-              {[...archive].reverse().slice(0, 20).map((insp, i) => {
-                const ok = insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
-                const pct = insp.couriers.length > 0 ? Math.round(ok / insp.couriers.length * 100) : 100;
-                return (
-                  <tr key={insp.archivedAt} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                    <td className="border-b border-slate-100 px-2 py-1.5">{formatDate(insp.date)}</td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">{insp.shift}</td>
-                    <td className="border-b border-slate-100 px-2 py-1.5 text-center font-bold">{insp.couriers.length}</td>
-                    <td className={`border-b border-slate-100 px-2 py-1.5 text-center font-bold ${pct >= 80 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600"}`}>{pct}%</td>
+          {/* Typy chyb + Top kurýři */}
+          <td width="38%" style={{ paddingLeft: "7px" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>Přehled chyb dle typu</div>
+            <table width="100%" cellPadding="0" cellSpacing="0" style={{ borderCollapse: "collapse", border: "1px solid #e2e8f0", marginBottom: "12px" }}>
+              <thead>
+                <tr>
+                  {["Kontrolní bod","Výhrad","%"].map(h => (
+                    <th key={h} style={th({ textAlign: h === "Kontrolní bod" ? "left" : "center" })}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {checkCounts.map((ch, i) => (
+                  <tr key={ch.name} style={{ backgroundColor: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                    <td style={td({ fontWeight: 500 })}>{ch.name}</td>
+                    <td style={td({ textAlign: "center", fontWeight: 700, color: ch.pocet > 0 ? "#d97706" : "#94a3b8" })}>{ch.pocet}</td>
+                    <td style={td({ textAlign: "center" })}>{allEntries.length > 0 ? Math.round(ch.pocet / allEntries.length * 100) : 0}%</td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                ))}
+              </tbody>
+            </table>
 
-      <div className="grid grid-cols-2 gap-6">
-        <div>
-          <h2 className="text-base font-bold mb-2">Top kurýři — nejvíce výhrad</h2>
-          <table className="w-full border-collapse text-xs border border-slate-200 rounded-xl overflow-hidden">
-            <thead className="bg-slate-50"><tr><th className="border-b border-slate-200 px-3 py-1.5 text-left">Kurýr</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">Výhrad</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">Kontrol</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">%</th></tr></thead>
-            <tbody>
-              {topCouriers.map((c, i) => (
-                <tr key={c.name} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                  <td className="border-b border-slate-100 px-3 py-1.5 font-medium">{c.name}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center font-bold text-amber-600">{c.issues}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center">{c.total}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center">{Math.round(c.issues / c.total * 100)}%</td>
+            <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>Top kurýři — výhrady</div>
+            <table width="100%" cellPadding="0" cellSpacing="0" style={{ borderCollapse: "collapse", border: "1px solid #e2e8f0" }}>
+              <thead>
+                <tr>
+                  {["Kurýr","Výhrad","% chyb"].map(h => (
+                    <th key={h} style={th({ textAlign: h === "Kurýr" ? "left" : "center" })}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div>
-          <h2 className="text-base font-bold mb-2">Top trasy — nejvíce výhrad</h2>
-          <table className="w-full border-collapse text-xs border border-slate-200 rounded-xl overflow-hidden">
-            <thead className="bg-slate-50"><tr><th className="border-b border-slate-200 px-3 py-1.5 text-left">Trasa</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">Výhrad</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">Kontrol</th><th className="border-b border-slate-200 px-3 py-1.5 text-center">%</th></tr></thead>
-            <tbody>
-              {topRoutes.map((r, i) => (
-                <tr key={r.route} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                  <td className="border-b border-slate-100 px-3 py-1.5 font-medium">{r.route}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center font-bold text-amber-600">{r.issues}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center">{r.total}</td>
-                  <td className="border-b border-slate-100 px-3 py-1.5 text-center">{Math.round(r.issues / r.total * 100)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              </thead>
+              <tbody>
+                {topCouriers.map((c, i) => (
+                  <tr key={c.name} style={{ backgroundColor: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
+                    <td style={td({ fontWeight: 500 })}>{c.name}</td>
+                    <td style={td({ textAlign: "center", fontWeight: 700, color: "#d97706" })}>{c.issues}</td>
+                    <td style={td({ textAlign: "center" })}>{Math.round(c.issues / c.total * 100)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </td>
+
+        </tr></tbody>
+      </table>
     </div>
   );
 }
 
 // ─── PRINTABLE REPORT ─────────────────────────────────────────────────────────
-function PrintableReport({ inspection, summary, showUniform = false }) {
+function PrintableReport({ inspection, summary }) {
   const sym = (status) => {
     if (status === "ok") return { s: "✓", cls: "text-emerald-700 font-bold" };
     if (status === "warning") return { s: "⚠", cls: "text-amber-600 font-bold" };
@@ -369,7 +539,7 @@ function PrintableReport({ inspection, summary, showUniform = false }) {
       </div>
 
       <div className="grid grid-cols-4 gap-2">
-        {[{ label: "Kontrolováno", value: summary.total, cls: "border-slate-300" }, { label: "✓ Vyhovělo", value: summary.ok, cls: "border-emerald-300 bg-emerald-50" }, { label: "⚠ S výhradou", value: summary.warning, cls: "border-amber-300 bg-amber-50" }, { label: "✗ Nevyhovělo", value: summary.fail, cls: "border-rose-300 bg-rose-50" }].map(s => (
+        {[{ label: "Kontrolováno", value: summary.total, cls: "border-slate-300" }, { label: "✓ Vyhovělo", value: summary.ok, cls: "border-emerald-300 bg-emerald-50" }, { label: "⚠ S výhradou", value: summary.warning, cls: "border-amber-300 bg-amber-50" }, { label: "✗ Nevyhověl", value: summary.fail, cls: "border-rose-300 bg-rose-50" }].map(s => (
           <div key={s.label} className={`border rounded-xl p-2 text-center ${s.cls}`}>
             <div className="text-2xl font-black">{s.value}</div>
             <div className="text-xs font-semibold text-slate-600">{s.label}</div>
@@ -377,8 +547,8 @@ function PrintableReport({ inspection, summary, showUniform = false }) {
         ))}
       </div>
 
-      <div>
-        <h2 className="text-base font-bold mb-1.5">Přehled kurýrů</h2>
+      <div className="grid grid-cols-1 gap-4">
+        {/* Přehled kurýrů */}
         <div className="overflow-hidden rounded-xl border border-slate-300">
           <table className="w-full border-collapse text-left text-xs">
             <thead className="bg-slate-100">
@@ -462,7 +632,11 @@ export default function CourierCheckApp() {
 
   useEffect(() => { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }, [archive]);
   useEffect(() => {
-    try { const s = localStorage.getItem(STORAGE_KEY); if (s) setInspection(JSON.parse(s)); } catch {}
+    try {
+      const s = localStorage.getItem(STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (s) { const parsed = JSON.parse(s); setInspection(parsed); }
+    } catch (e) { console.warn("Nelze načíst uloženou kontrolu", e); }
   }, []);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(inspection)); }, [inspection]);
 
@@ -522,9 +696,35 @@ export default function CourierCheckApp() {
         @media print {
           .print-hide-on-print { display: none !important; }
           .print-show-only { display: block !important; }
-          @page { size: A4 landscape; margin: 10mm; }
-          table { font-size: 9pt !important; }
-          th, td { padding: 3pt 5pt !important; }
+          /* Modal overlay — odstraň backdrop */
+          .print-modal-overlay {
+            position: static !important;
+            background: none !important;
+            backdrop-filter: none !important;
+            display: block !important;
+          }
+          /* Modal okno — rozbal na celou stránku */
+          .print-modal-window {
+            max-height: none !important;
+            overflow: visible !important;
+            border-radius: 0 !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            display: block !important;
+          }
+          /* Skryj záhlaví modalu (tlačítka, tabs) */
+          .print-modal-controls { display: none !important; }
+          /* Preview obsah — tiskni normálně */
+          .print-modal-scroll {
+            overflow: visible !important;
+            padding: 0 !important;
+          }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          body > * { display: none !important; }
+          body > #root .print-modal-overlay,
+          body > #root .print-modal-overlay * { display: revert !important; }
+          body > #root .print-modal-controls { display: none !important; }
+          body > #root .print-hide-on-print { display: none !important; }
         }
         .print-show-only { display: none; }
       `}</style>
@@ -890,9 +1090,9 @@ function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection,
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold">Nejčastější typy chyb</h3>
         <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={stats.checkCounts} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} /><XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} /><YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} /><Tooltip />
-            <Bar dataKey="pocet" name="Počet" fill="#f59e0b" radius={[0, 6, 6, 0]} />
+          <BarChart data={stats.checkCounts} layout="vertical" margin={{ top: 4, right: 30, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} /><XAxis type="number" tick={{ fontSize: 9 }} allowDecimals={false} /><YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={90} /><Tooltip />
+            <Bar dataKey="pocet" name="Počet" fill="#f59e0b" radius={[0,4,4,0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
