@@ -891,7 +891,7 @@ export default function CourierCheckApp() {
       console.log("💾 Ukládám do Supabase:", updated);
 
       // Ulož do Supabase
-      await updateCourierInSupabase(updated);
+      await updateCourier(updated);
       
       console.log("✅ Uloženo do Supabase");
 
