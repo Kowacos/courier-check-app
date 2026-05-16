@@ -626,23 +626,63 @@ export default function CourierCheckApp() {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState("check");
   const [printModal, setPrintModal] = useState(null);
-  const [archive, setArchive] = useState(() => {
-    try { const s = localStorage.getItem(ARCHIVE_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
-  });
-  const [drafts, setDrafts] = useState(() => {
-    try { const s = localStorage.getItem(DRAFTS_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
-  });
+  const [archive, setArchive] = useState([]);
+  const [drafts, setDrafts] = useState([]);
   const [showDrafts, setShowDrafts] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // Načti data z Supabase při startu
+  useEffect(() => {
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        // Načti archiv z Supabase
+        const archiveData = await fetchArchive();
+        if (archiveData) {
+          setArchive(archiveData);
+          localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archiveData));
+        } else {
+          // Fallback na localStorage
+          const s = localStorage.getItem(ARCHIVE_KEY);
+          if (s) setArchive(JSON.parse(s));
+        }
+
+        // Načti drafty z Supabase
+        const draftsData = await fetchDrafts();
+        if (draftsData) {
+          setDrafts(draftsData);
+          localStorage.setItem(DRAFTS_KEY, JSON.stringify(draftsData));
+        } else {
+          // Fallback na localStorage
+          const s = localStorage.getItem(DRAFTS_KEY);
+          if (s) setDrafts(JSON.parse(s));
+        }
+
+        // Načti aktuální kontrolu z localStorage
+        const s = localStorage.getItem(STORAGE_KEY);
+        if (s) {
+          const parsed = JSON.parse(s);
+          setInspection(parsed);
+        }
+      } catch (e) {
+        console.warn("Chyba při načítání dat:", e);
+        // Fallback na localStorage
+        try {
+          const archiveStr = localStorage.getItem(ARCHIVE_KEY);
+          const draftsStr = localStorage.getItem(DRAFTS_KEY);
+          if (archiveStr) setArchive(JSON.parse(archiveStr));
+          if (draftsStr) setDrafts(JSON.parse(draftsStr));
+        } catch {}
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  // Synchronizuj localStorage (pro offline použití)
   useEffect(() => { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }, [archive]);
   useEffect(() => { localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts)); }, [drafts]);
-  useEffect(() => {
-    try {
-      const s = localStorage.getItem(STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (s) { const parsed = JSON.parse(s); setInspection(parsed); }
-    } catch (e) { console.warn("Nelze načíst uloženou kontrolu", e); }
-  }, []);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(inspection)); }, [inspection]);
 
   const activeCourier = inspection.couriers.find(c => c.id === activeCourierId) || null;
@@ -658,10 +698,17 @@ export default function CourierCheckApp() {
   function updateCourier(id, fn) { setInspection(cur => ({ ...cur, couriers: cur.couriers.map(c => c.id === id ? fn(c) : c) })); }
   function deleteCourier(id) { setInspection(cur => ({ ...cur, couriers: cur.couriers.filter(c => c.id !== id) })); if (activeCourierId === id) setActiveCourierId(null); }
 
-  function archiveAndReset() {
+  async function archiveAndReset() {
     if (inspection.couriers.length === 0) { alert("Nejsou žádní kurýři k archivaci."); return; }
     if (!window.confirm(`Archivovat tuto kontrolu (${inspection.couriers.length} kurýrů) a začít novou?`)) return;
-    setArchive(prev => [...prev, { ...inspection, archivedAt: new Date().toISOString() }]);
+
+    const archived = { ...inspection, archivedAt: new Date().toISOString() };
+
+    // Ulož do Supabase
+    await insertArchiveEntry(archived);
+
+    // Aktualizuj lokální stav
+    setArchive(prev => [...prev, archived]);
     setInspection({ date: todayISO(), depot: inspection.depot, inspector: inspection.inspector, shift: inspection.shift, note: "", couriers: [] });
     setActiveCourierId(null);
   }
@@ -678,10 +725,15 @@ export default function CourierCheckApp() {
     setActiveCourierId(null); setActiveTab("check");
   }
 
-  function saveEditedBackToArchive() {
+  async function saveEditedBackToArchive() {
     if (!window.confirm("Uložit změny zpět do archivu? Původní záznam se přepíše.")) return;
     const archivedAt = inspection.archivedAt;
     if (!archivedAt) { alert("Tato kontrola není z archivu."); return; }
+
+    // Ulož do Supabase
+    await updateArchiveEntry(inspection);
+
+    // Aktualizuj lokální stav
     setArchive(prev => prev.map(a => a.archivedAt === archivedAt ? { ...inspection } : a));
     alert("Uloženo do archivu.");
   }
@@ -693,9 +745,14 @@ export default function CourierCheckApp() {
     });
   }
 
-  function saveCurrentToDrafts(insp) {
+  async function saveCurrentToDrafts(insp) {
     // Přidá nebo aktualizuje aktuální kontrolu v seznamu draftů
     const withId = insp.id ? insp : { ...insp, id: crypto.randomUUID() };
+
+    // Ulož do Supabase
+    await upsertDraft(withId);
+
+    // Aktualizuj lokální stav
     setDrafts(cur => {
       const exists = cur.find(d => d.id === withId.id);
       if (exists) return cur.map(d => d.id === withId.id ? withId : d);
@@ -716,15 +773,19 @@ export default function CourierCheckApp() {
     }
   }
 
-  function deleteDraft(id) {
+  async function deleteDraft(id) {
     if (window.confirm("Smazat tuto rozpracovanou kontrolu?")) {
+      // Smaž z Supabase
+      await deleteDraftFromDB(id);
+
+      // Aktualizuj lokální stav
       setDrafts(cur => cur.filter(d => d.id !== id));
     }
   }
 
-  function createNewDraft() {
+  async function createNewDraft() {
     // Ulož aktuální kontrolu a otevři prázdnou novou
-    saveCurrentToDrafts(inspection);
+    await saveCurrentToDrafts(inspection);
     const newInsp = { id: crypto.randomUUID(), date: todayISO(), depot: inspection.depot, inspector: inspection.inspector, shift: "Ranní kontrola", note: "", couriers: [], createdAt: new Date().toISOString() };
     setInspection(newInsp);
     setActiveCourierId(null);
@@ -735,15 +796,37 @@ export default function CourierCheckApp() {
   // Automaticky přidej/aktualizuj aktuální kontrolu v draftech při každé změně (jen pokud má id)
   useEffect(() => {
     if (!inspection.id) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDrafts(cur => {
-      const exists = cur.find(d => d.id === inspection.id);
-      if (exists) return cur.map(d => d.id === inspection.id ? inspection : d);
-      return cur;
-    });
+
+    // Debounce: ulož po 2 sekundách od poslední změny
+    const timer = setTimeout(async () => {
+      await upsertDraft(inspection);
+      setDrafts(cur => {
+        const exists = cur.find(d => d.id === inspection.id);
+        if (exists) return cur.map(d => d.id === inspection.id ? inspection : d);
+        return cur;
+      });
+    }, 2000);
+
+    return () => clearTimeout(timer);
   }, [inspection]);
 
   const isEditingArchived = !!inspection.archivedAt;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950 text-white mx-auto animate-pulse">
+            <ClipboardCheck className="h-8 w-8" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Načítám data...</h2>
+            <p className="text-sm text-slate-500 mt-1">Synchronizace s cloudem</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
