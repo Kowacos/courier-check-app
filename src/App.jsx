@@ -877,20 +877,35 @@ export default function CourierCheckApp() {
   // Upravit kurýra v kartotéce
   async function updateCourierInDB(id, updates) {
     try {
+      console.log("📝 Aktualizuji kurýra:", id, updates);
+      
       // Najdi kurýra a uprav ho
       const updatedCourier = couriersDB.find(c => c.id === id);
-      if (!updatedCourier) return;
+      if (!updatedCourier) {
+        console.error("❌ Kurýr nenalezen:", id);
+        return;
+      }
 
       const updated = { ...updatedCourier, ...updates };
+      
+      console.log("💾 Ukládám do Supabase:", updated);
 
       // Ulož do Supabase
-      await updateCourier(updated);
+      await updateCourierInSupabase(updated);
+      
+      console.log("✅ Uloženo do Supabase");
 
       // Aktualizuj lokální stav
-      setCouriersDB(prev => prev.map(c => c.id === id ? updated : c));
+      setCouriersDB(prev => {
+        const newState = prev.map(c => c.id === id ? updated : c);
+        console.log("✅ Lokální stav aktualizován");
+        return newState;
+      });
+      
+      alert("✅ Kurýr aktualizován");
     } catch (e) {
-      console.error("Chyba při aktualizaci kurýra:", e);
-      alert("❌ Chyba při ukládání změn do cloudu");
+      console.error("❌ Chyba při aktualizaci kurýra:", e);
+      alert("❌ Chyba při ukládání změn do cloudu: " + e.message);
     }
   }
 
@@ -929,9 +944,33 @@ export default function CourierCheckApp() {
     window.location.reload();
   }
 
-  // Najít kurýra v kartotéce podle jména
-  function findCourierInDB(name) {
-    return couriersDB.find(c => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+  // Znovu načíst data ze Supabase (bez reloadu stránky)
+  async function reloadFromSupabase() {
+    if (!window.confirm("Znovu načíst všechna data ze Supabase?")) return;
+    
+    setIsLoading(true);
+    try {
+      // Načti kontroly
+      const savedData = await fetchArchive();
+      if (savedData) {
+        setSavedInspections(savedData);
+        localStorage.setItem(SAVED_KEY, JSON.stringify(savedData));
+      }
+      
+      // Načti kurýry
+      const couriersData = await fetchCouriers();
+      if (couriersData) {
+        setCouriersDB(couriersData);
+        localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(couriersData));
+      }
+      
+      alert("✅ Data znovu načtena ze Supabase!");
+    } catch (e) {
+      console.error("Chyba při načítání:", e);
+      alert("❌ Chyba při načítání dat ze Supabase");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function addQuickNote(courierId, checkId, text) {
@@ -1135,13 +1174,22 @@ export default function CourierCheckApp() {
           </div>
 
           {/* Místo pro budoucí funkce */}
-          <button
-            onClick={clearLocalStorageCache}
-            className="rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition"
-            title="Vyčistit lokální cache"
-          >
-            🔄
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={reloadFromSupabase}
+              className="rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition"
+              title="Znovu načíst data ze Supabase"
+            >
+              ⬇️
+            </button>
+            <button
+              onClick={clearLocalStorageCache}
+              className="rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition"
+              title="Vyčistit lokální cache a reload"
+            >
+              🔄
+            </button>
+          </div>
         </div>
 
         {/* Akční tlačítka */}
