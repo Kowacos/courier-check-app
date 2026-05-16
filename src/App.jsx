@@ -764,7 +764,7 @@ export default function CourierCheckApp() {
     }
   }
 
-  function updateCourier(id, fn) { setInspection(cur => ({ ...cur, couriers: cur.couriers.map(c => c.id === id ? fn(c) : c) })); }
+  function updateCourierInInspection(id, fn) { setInspection(cur => ({ ...cur, couriers: cur.couriers.map(c => c.id === id ? fn(c) : c) })); }
   function deleteCourier(id) { setInspection(cur => ({ ...cur, couriers: cur.couriers.filter(c => c.id !== id) })); if (activeCourierId === id) setActiveCourierId(null); }
 
   // Uložit aktuální kontrolu
@@ -1027,7 +1027,7 @@ export default function CourierCheckApp() {
   }
 
   function addQuickNote(courierId, checkId, text) {
-    updateCourier(courierId, c => {
+    updateCourierInInspection(courierId, c => {
       const cur = c.checks?.[checkId]?.note || "";
       return { ...c, checks: { ...c.checks, [checkId]: { ...(c.checks?.[checkId] || { status: "ok" }), note: cur ? `${cur}\n${text}` : text } } };
     });
@@ -1043,7 +1043,7 @@ export default function CourierCheckApp() {
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      updateCourier(courierId, c => {
+      updateCourierInInspection(courierId, c => {
         const photos = c.checks?.[checkId]?.photos || [];
         return {
           ...c,
@@ -1062,7 +1062,7 @@ export default function CourierCheckApp() {
 
   // Smazání fotky
   const deletePhoto = (courierId, checkId, photoId) => {
-    updateCourier(courierId, c => ({
+    updateCourierInInspection(courierId, c => ({
       ...c,
       checks: {
         ...c.checks,
@@ -1388,7 +1388,14 @@ export default function CourierCheckApp() {
           </aside>
           <section className="space-y-5">
             {activeCourier
-              ? <CourierEditor courier={activeCourier} updateCourier={updateCourier} deleteCourier={deleteCourier} addQuickNote={addQuickNote} />
+              ? <CourierEditor
+                  courier={activeCourier}
+                  updateCourier={updateCourierInInspection}
+                  deleteCourier={deleteCourier}
+                  addQuickNote={addQuickNote}
+                  addPhotoToCheck={addPhotoToCheck}
+                  deletePhoto={deletePhoto}
+                />
               : <EmptyState onAdd={addCourier} />}
           </section>
         </main>
@@ -1423,7 +1430,7 @@ function EmptyState({ onAdd }) {
   );
 }
 
-function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) {
+function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote, addPhotoToCheck, deletePhoto }) {
   const result = getCourierResult(courier);
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
