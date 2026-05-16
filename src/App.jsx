@@ -704,16 +704,22 @@ export default function CourierCheckApp() {
         savedAt
       };
 
+      console.log("💾 Ukládám kontrolu:", saved.id, "do Supabase...");
+
       // Ulož do Supabase
       if (inspection.id) {
         // Aktualizace existující
+        console.log("📝 Aktualizuji existující kontrolu:", saved.id);
         await updateArchiveEntry(saved);
         setSavedInspections(prev => prev.map(s => s.id === saved.id ? saved : s));
       } else {
         // Nová kontrola
+        console.log("✨ Vytvářím novou kontrolu:", saved.id);
         await insertArchiveEntry(saved);
         setSavedInspections(prev => [saved, ...prev]);
       }
+
+      console.log("✅ Kontrola uložena do Supabase!");
 
       // Resetuj aktuální kontrolu
       setInspection({
@@ -728,8 +734,8 @@ export default function CourierCheckApp() {
 
       alert("✅ Kontrola uložena!");
     } catch (e) {
-      console.error("Chyba při ukládání:", e);
-      alert("❌ Chyba při ukládání. Zkus to znovu.");
+      console.error("❌ Chyba při ukládání:", e);
+      alert("❌ Chyba při ukládání. Zkontroluj konzoli (F12) pro detaily.");
     } finally {
       setIsSaving(false);
     }
