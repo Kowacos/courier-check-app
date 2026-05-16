@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  fetchArchive, insertArchiveEntry, updateArchiveEntry, deleteArchiveEntry
+  fetchArchive, insertArchiveEntry, updateArchiveEntry, deleteArchiveEntry,
+  fetchCouriers, insertCourier, updateCourier, deleteCourier
 } from "./supabaseService";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, Camera, Image as ImageIcon, User } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 
 function Button({ children, className = "", variant = "default", size = "md", ...props }) {
-  const base = "inline-flex items-center justify-center rounded-2xl font-semibold transition disabled:pointer-events-none disabled:opacity-50";
-  const sizes = { sm: "px-3 py-1.5 text-xs", md: "px-4 py-2 text-sm" };
+  const base = "inline-flex items-center justify-center rounded-2xl font-semibold transition disabled:pointer-events-none disabled:opacity-50 active:scale-95";
+  const sizes = {
+    sm: "px-3 py-1.5 text-xs min-h-[36px]",  // Větší min-height pro tablet
+    md: "px-4 py-2 text-sm min-h-[44px]"     // Větší min-height pro tablet
+  };
   const variants = {
-    default: "bg-slate-950 text-white hover:bg-slate-800",
-    outline: "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
-    ghost: "bg-transparent hover:bg-slate-100",
-    destructive: "bg-rose-600 text-white hover:bg-rose-700",
-    success: "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50",
-    blue: "border border-blue-200 bg-white text-blue-700 hover:bg-blue-50",
+    default: "bg-slate-950 text-white hover:bg-slate-800 active:bg-slate-900",
+    outline: "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50 active:bg-slate-100",
+    ghost: "bg-transparent hover:bg-slate-100 active:bg-slate-200",
+    destructive: "bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800",
+    success: "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100",
+    blue: "border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 active:bg-blue-100",
   };
   return (
     <button className={`${base} ${sizes[size] || sizes.md} ${variants[variant] || variants.default} ${className}`} {...props}>
@@ -29,6 +33,7 @@ function CardContent({ children, className = "" }) { return <div className={clas
 
 const STORAGE_KEY = "courier-current-v2";
 const SAVED_KEY = "courier-saved-v2";
+const COURIERS_DB_KEY = "couriers-database-v1";
 
 const CHECKS = [
   { id: "serviceCrosses", title: "Servisní kříže na balících", short: "Serv. kříže", description: "Kontrola, zda jsou na balících správně vyplněné servisní kříže.", quickNotes: ["Chybějící servisní kříž","Špatně vyplněný servisní kříž","Kurýr proškolen","Opraveno na místě","Nutná opakovaná kontrola"] },
@@ -627,6 +632,9 @@ export default function CourierCheckApp() {
   const [savedInspections, setSavedInspections] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [couriersDB, setCouriersDB] = useState([]); // Kartotéka kurýrů
+  const [showCourierModal, setShowCourierModal] = useState(false);
+  const [editingCourierData, setEditingCourierData] = useState(null);
 
   // Načti data při startu
   useEffect(() => {
@@ -644,6 +652,19 @@ export default function CourierCheckApp() {
           if (s) setSavedInspections(JSON.parse(s));
         }
 
+        // Načti kartotéku kurýrů z Supabase
+        const couriersData = await fetchCouriers();
+        if (couriersData) {
+          setCouriersDB(couriersData);
+          localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(couriersData));
+        } else {
+          // Fallback na localStorage
+          const couriersStr = localStorage.getItem(COURIERS_DB_KEY);
+          if (couriersStr) {
+            setCouriersDB(JSON.parse(couriersStr));
+          }
+        }
+
         // Načti aktuální rozdělanou kontrolu z localStorage
         const currentStr = localStorage.getItem(STORAGE_KEY);
         if (currentStr) {
@@ -655,6 +676,8 @@ export default function CourierCheckApp() {
         try {
           const s = localStorage.getItem(SAVED_KEY);
           if (s) setSavedInspections(JSON.parse(s));
+          const c = localStorage.getItem(COURIERS_DB_KEY);
+          if (c) setCouriersDB(JSON.parse(c));
         } catch (parseError) {
           console.error("Chyba při parsování localStorage:", parseError);
         }
@@ -674,6 +697,11 @@ export default function CourierCheckApp() {
   useEffect(() => {
     localStorage.setItem(SAVED_KEY, JSON.stringify(savedInspections));
   }, [savedInspections]);
+
+  // Synchronizuj kartotéku kurýrů do localStorage
+  useEffect(() => {
+    localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(couriersDB));
+  }, [couriersDB]);
 
   const activeCourier = inspection.couriers.find(c => c.id === activeCourierId) || null;
   const filteredCouriers = useMemo(() => {
@@ -782,11 +810,123 @@ export default function CourierCheckApp() {
     }
   }
 
+  // === KARTOTÉKA KURÝRŮ ===
+
+  // Přidat kurýra do kartotéky
+  async function addCourierToDB(courierData) {
+    const newCourier = {
+      id: crypto.randomUUID(),
+      name: courierData.name || "",
+      phone: courierData.phone || "",
+      email: courierData.email || "",
+      primaryRoute: courierData.primaryRoute || "",
+      primaryVehicle: courierData.primaryVehicle || "",
+      notes: courierData.notes || "",
+      createdAt: new Date().toISOString(),
+      ...courierData
+    };
+
+    try {
+      // Ulož do Supabase
+      await insertCourier(newCourier);
+
+      // Aktualizuj lokální stav
+      setCouriersDB(prev => [newCourier, ...prev]);
+      return newCourier;
+    } catch (e) {
+      console.error("Chyba při přidávání kurýra:", e);
+      alert("❌ Chyba při ukládání kurýra do cloudu");
+      return null;
+    }
+  }
+
+  // Upravit kurýra v kartotéce
+  async function updateCourierInDB(id, updates) {
+    try {
+      // Najdi kurýra a uprav ho
+      const updatedCourier = couriersDB.find(c => c.id === id);
+      if (!updatedCourier) return;
+
+      const updated = { ...updatedCourier, ...updates };
+
+      // Ulož do Supabase
+      await updateCourier(updated);
+
+      // Aktualizuj lokální stav
+      setCouriersDB(prev => prev.map(c => c.id === id ? updated : c));
+    } catch (e) {
+      console.error("Chyba při aktualizaci kurýra:", e);
+      alert("❌ Chyba při ukládání změn do cloudu");
+    }
+  }
+
+  // Smazat kurýra z kartotéky
+  async function deleteCourierFromDB(id) {
+    if (!window.confirm("Opravdu smazat kurýra z kartotéky?")) return;
+
+    try {
+      // Smaž z Supabase
+      await deleteCourier(id);
+
+      // Aktualizuj lokální stav
+      setCouriersDB(prev => prev.filter(c => c.id !== id));
+    } catch (e) {
+      console.error("Chyba při mazání kurýra:", e);
+      alert("❌ Chyba při mazání kurýra z cloudu");
+    }
+  }
+
+  // Najít kurýra v kartotéce podle jména
+  function findCourierInDB(name) {
+    return couriersDB.find(c => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+  }
+
   function addQuickNote(courierId, checkId, text) {
     updateCourier(courierId, c => {
       const cur = c.checks?.[checkId]?.note || "";
       return { ...c, checks: { ...c.checks, [checkId]: { ...(c.checks?.[checkId] || { status: "ok" }), note: cur ? `${cur}\n${text}` : text } } };
     });
+  }
+
+  // Nahrání fotky k výhradě
+  function addPhotoToCheck(courierId, checkId, file) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Fotka je příliš velká (max 5 MB)");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      updateCourier(courierId, c => {
+        const photos = c.checks?.[checkId]?.photos || [];
+        return {
+          ...c,
+          checks: {
+            ...c.checks,
+            [checkId]: {
+              ...(c.checks?.[checkId] || { status: "ok" }),
+              photos: [...photos, { id: crypto.randomUUID(), data: e.target.result, name: file.name, date: new Date().toISOString() }]
+            }
+          }
+        };
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Smazání fotky
+  function deletePhoto(courierId, checkId, photoId) {
+    updateCourier(courierId, c => ({
+      ...c,
+      checks: {
+        ...c.checks,
+        [checkId]: {
+          ...(c.checks?.[checkId] || {}),
+          photos: (c.checks?.[checkId]?.photos || []).filter(p => p.id !== photoId)
+        }
+      }
+    }));
   }
 
   const isEditingExisting = !!inspection.id;
@@ -854,6 +994,29 @@ export default function CourierCheckApp() {
         )}
       </AnimatePresence>
 
+      {/* Modal pro přidání/editaci kurýra */}
+      <AnimatePresence mode="wait">
+        {showCourierModal && (
+          <CourierEditModal
+            key={editingCourierData?.id || "new-courier"}
+            courier={editingCourierData}
+            onSave={(data) => {
+              if (editingCourierData) {
+                updateCourierInDB(editingCourierData.id, data);
+              } else {
+                addCourierToDB(data);
+              }
+              setShowCourierModal(false);
+              setEditingCourierData(null);
+            }}
+            onClose={() => {
+              setShowCourierModal(false);
+              setEditingCourierData(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       <header className="print-hide-on-print sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           {/* Logo */}
@@ -869,22 +1032,32 @@ export default function CourierCheckApp() {
           </div>
 
           {/* Tab přepínač */}
-          <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-100 p-1">
+          <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-100 p-1 overflow-x-auto">
+            <button onClick={() => setActiveTab("dashboard")}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "dashboard" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              <BarChart2 className="h-4 w-4" />
+              <span className="hidden xs:inline">Přehled</span>
+            </button>
             <button onClick={() => setActiveTab("check")}
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "check" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "check" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
               <ClipboardCheck className="h-4 w-4" />
               <span className="hidden xs:inline">Kontrola</span>
             </button>
             <button onClick={() => setActiveTab("history")}
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "history" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "history" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
               <Archive className="h-4 w-4" />
               <span className="hidden xs:inline">Historie</span>
               {savedInspections.length > 0 && <span className="rounded-full bg-slate-950 text-white text-xs px-1.5 py-0.5">{savedInspections.length}</span>}
             </button>
+            <button onClick={() => setActiveTab("couriers")}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "couriers" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              <User className="h-4 w-4" />
+              <span className="hidden xs:inline">Kurýři</span>
+            </button>
             <button onClick={() => setActiveTab("stats")}
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
               <BarChart2 className="h-4 w-4" />
-              <span className="hidden xs:inline">Statistiky</span>
+              <span className="hidden sm:inline">Statistiky</span>
             </button>
           </div>
 
@@ -939,6 +1112,27 @@ export default function CourierCheckApp() {
       ) : activeTab === "stats" ? (
         <main className="print-hide-on-print mx-auto max-w-7xl px-4 py-5 sm:px-6">
           <StatsView archive={savedInspections} />
+        </main>
+      ) : activeTab === "dashboard" ? (
+        <main className="print-hide-on-print mx-auto max-w-7xl px-4 py-5 sm:px-6">
+          <DashboardView
+            savedInspections={savedInspections}
+            currentInspection={inspection}
+            onGoToCheck={() => setActiveTab("check")}
+            onGoToHistory={() => setActiveTab("history")}
+          />
+        </main>
+      ) : activeTab === "couriers" ? (
+        <main className="print-hide-on-print mx-auto max-w-7xl px-4 py-5 sm:px-6">
+          <CouriersView
+            savedInspections={savedInspections}
+            couriersDB={couriersDB}
+            onAddCourier={addCourierToDB}
+            onUpdateCourier={updateCourierInDB}
+            onDeleteCourier={deleteCourierFromDB}
+            onShowAddModal={() => { setShowCourierModal(true); setEditingCourierData(null); }}
+            onShowEditModal={(courier) => { setShowCourierModal(true); setEditingCourierData(courier); }}
+          />
         </main>
       ) : (
         <main className="print-hide-on-print mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[390px_1fr]">
@@ -1071,13 +1265,13 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
           <Card key={check.id} className="rounded-3xl border-slate-200 shadow-sm">
             <CardContent className="space-y-4 p-5 sm:p-6">
               <div><h3 className="text-lg font-bold">{check.title}</h3><p className="text-sm text-slate-500">{check.description}</p></div>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {STATUS_OPTIONS.map(option => {
                   const Icon = option.icon; const selected = value === option.value;
                   return (
                     <button key={option.value} onClick={() => updateCourier(courier.id, c => ({ ...c, checks: { ...c.checks, [check.id]: { ...(c.checks?.[check.id] || {}), status: option.value } } }))}
-                      className={`flex items-center justify-center gap-2 rounded-2xl border px-3 py-3 font-semibold transition ${selected ? statusClasses(option.value) : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"}`}>
-                      <Icon className="h-5 w-5" /> {option.label}
+                      className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-4 font-semibold transition active:scale-95 min-h-[56px] ${selected ? statusClasses(option.value) : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white active:bg-slate-100"}`}>
+                      <Icon className="h-6 w-6" /> {option.label}
                     </button>
                   );
                 })}
@@ -1132,11 +1326,64 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
                 <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
                   <div className="flex flex-wrap gap-2">
                     {check.quickNotes.map(qn => (
-                      <button key={qn} onClick={() => addQuickNote(courier.id, check.id, qn)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400">+ {qn}</button>
+                      <button key={qn} onClick={() => addQuickNote(courier.id, check.id, qn)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400 active:scale-95 transition">+ {qn}</button>
                     ))}
                   </div>
                   <textarea value={note} onChange={e => updateCourier(courier.id, c => ({ ...c, checks: { ...c.checks, [check.id]: { ...(c.checks?.[check.id] || {}), note: e.target.value } } }))}
                     rows={3} placeholder="Doplň poznámku k nedostatku..." className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base outline-none focus:border-slate-400" />
+
+                  {/* Fotky */}
+                  <div className="space-y-2 pt-2 border-t border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-slate-700">📷 Fotky k výhradě</label>
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) addPhotoToCheck(courier.id, check.id, file);
+                            e.target.value = "";
+                          }}
+                        />
+                        <span className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400 transition active:scale-95">
+                          <Camera className="h-4 w-4" /> Přidat fotku
+                        </span>
+                      </label>
+                    </div>
+                    {(courier.checks?.[check.id]?.photos?.length > 0) && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {courier.checks[check.id].photos.map(photo => (
+                          <div key={photo.id} className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-white">
+                            <img
+                              src={photo.data}
+                              alt={photo.name}
+                              className="h-full w-full object-cover"
+                            />
+                            <button
+                              onClick={() => deletePhoto(courier.id, check.id, photo.id)}
+                              className="absolute top-1 right-1 rounded-full bg-rose-500 p-1.5 text-white opacity-0 group-hover:opacity-100 transition active:scale-95"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                const a = document.createElement("a");
+                                a.href = photo.data;
+                                a.download = photo.name;
+                                a.click();
+                              }}
+                              className="absolute bottom-1 right-1 rounded-full bg-slate-950 p-1.5 text-white opacity-0 group-hover:opacity-100 transition active:scale-95"
+                            >
+                              <ImageIcon className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1156,8 +1403,7 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
               <textarea value={courier.generalNote} onChange={e => updateCourier(courier.id, c => ({ ...c, generalNote: e.target.value }))} rows={3} className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base outline-none focus:border-slate-400" placeholder="Např. domluvena opakovaná kontrola..." />
             </label>
           </div>
-          <div className="flex flex-wrap justify-between gap-2 border-t border-slate-100 pt-4">
-            <Button variant="outline" onClick={() => alert("Uloženo automaticky.")}><Save className="mr-2 h-4 w-4" /> Uloženo automaticky</Button>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
             <Button variant="destructive" onClick={() => deleteCourier(courier.id)}><Trash2 className="mr-2 h-4 w-4" /> Smazat kurýra</Button>
           </div>
         </CardContent>
@@ -1276,8 +1522,231 @@ function StatsView({ archive }) {
   );
 }
 
+// ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
+function DashboardView({ savedInspections, currentInspection, onGoToCheck, onGoToHistory }) {
+  const todayStats = useMemo(() => {
+    const today = todayISO();
+    const todayInspections = savedInspections.filter(insp => insp.date === today);
+    const couriers = todayInspections.flatMap(insp => insp.couriers);
+    const issues = couriers.filter(c => getCourierResult(c).tone !== "ok").length;
+
+    return {
+      inspections: todayInspections.length,
+      couriers: couriers.length,
+      ok: couriers.length - issues,
+      issues
+    };
+  }, [savedInspections]);
+
+  const weekStats = useMemo(() => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const weekInspections = savedInspections.filter(insp => new Date(insp.date) >= weekAgo);
+    const couriers = weekInspections.flatMap(insp => insp.couriers);
+    const issues = couriers.filter(c => getCourierResult(c).tone !== "ok").length;
+
+    return {
+      inspections: weekInspections.length,
+      couriers: couriers.length,
+      ok: couriers.length - issues,
+      issues
+    };
+  }, [savedInspections]);
+
+  // Top kurýři s výhradami (poslední týden)
+  const topCouriers = useMemo(() => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const weekInspections = savedInspections.filter(insp => new Date(insp.date) >= weekAgo);
+    const courierMap = {};
+
+    weekInspections.forEach(insp => {
+      insp.couriers.forEach(c => {
+        const name = c.name?.trim() || "Bez jména";
+        if (!courierMap[name]) courierMap[name] = { name, issues: 0, total: 0 };
+        courierMap[name].total += 1;
+        if (getCourierResult(c).tone !== "ok") courierMap[name].issues += 1;
+      });
+    });
+
+    return Object.values(courierMap)
+      .sort((a, b) => b.issues - a.issues)
+      .slice(0, 5);
+  }, [savedInspections]);
+
+  const hasCurrentWork = currentInspection.couriers.length > 0;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold">📊 Rychlý přehled</h2>
+        <p className="text-slate-500">Dnešní a týdenní statistiky</p>
+      </div>
+
+      {/* Rozdělaná kontrola */}
+      {hasCurrentWork && (
+        <div className="rounded-3xl border-2 border-blue-200 bg-blue-50 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-blue-900">🚧 Máš rozdělanou kontrolu</h3>
+              <p className="mt-1 text-sm text-blue-700">
+                {currentInspection.couriers.length} {currentInspection.couriers.length === 1 ? "kurýr" : currentInspection.couriers.length < 5 ? "kurýři" : "kurýrů"} · {formatDate(currentInspection.date)}
+              </p>
+            </div>
+            <Button onClick={onGoToCheck} className="shrink-0">
+              Dokončit kontrolu
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Dnešní statistiky */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-3xl font-bold">{todayStats.inspections}</div>
+          <div className="mt-1 text-sm font-medium text-slate-600">Dnešní kontroly</div>
+        </div>
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-3xl font-bold">{todayStats.couriers}</div>
+          <div className="mt-1 text-sm font-medium text-slate-600">Dnešních kurýrů</div>
+        </div>
+        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <div className="text-3xl font-bold text-emerald-700">{todayStats.ok}</div>
+          <div className="mt-1 text-sm font-medium text-emerald-600">✓ Bez výhrad dnes</div>
+        </div>
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <div className="text-3xl font-bold text-amber-700">{todayStats.issues}</div>
+          <div className="mt-1 text-sm font-medium text-amber-600">⚠ Výhrad dnes</div>
+        </div>
+      </div>
+
+      {/* Týdenní statistiky */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">Poslední týden</h3>
+        <div className="grid gap-4 sm:grid-cols-4">
+          <div>
+            <div className="text-2xl font-bold">{weekStats.inspections}</div>
+            <div className="text-sm text-slate-600">Kontrol</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold">{weekStats.couriers}</div>
+            <div className="text-sm text-slate-600">Kurýrů</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-emerald-600">{weekStats.ok}</div>
+            <div className="text-sm text-slate-600">Bez výhrad</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-amber-600">{weekStats.issues}</div>
+            <div className="text-sm text-slate-600">S výhradami</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Top kurýři s výhradami */}
+      {topCouriers.length > 0 && (
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold">⚠️ Poslední týden - kurýři s výhradami</h3>
+          <div className="space-y-2">
+            {topCouriers.map((c, i) => (
+              <div key={c.name} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3">
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                  i === 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
+                }`}>
+                  {i + 1}
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold">{c.name}</div>
+                  <div className="text-xs text-slate-500">
+                    {c.issues} {c.issues === 1 ? "výhrada" : c.issues < 5 ? "výhrady" : "výhrad"} z {c.total} kontrol
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold text-amber-600">{c.issues}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rychlé akce */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <button
+          onClick={onGoToCheck}
+          className="flex items-center gap-4 rounded-3xl border-2 border-slate-200 bg-white p-6 text-left hover:border-slate-950 hover:shadow-lg transition"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
+            <Plus className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="font-bold text-lg">Nová kontrola</div>
+            <div className="text-sm text-slate-500">Začít kontrolu kurýrů</div>
+          </div>
+        </button>
+
+        <button
+          onClick={onGoToHistory}
+          className="flex items-center gap-4 rounded-3xl border-2 border-slate-200 bg-white p-6 text-left hover:border-slate-950 hover:shadow-lg transition"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
+            <Archive className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="font-bold text-lg">Historie</div>
+            <div className="text-sm text-slate-500">{savedInspections.length} uložených kontrol</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── HISTORY VIEW ─────────────────────────────────────────────────────────────
 function HistoryView({ savedInspections, onLoadInspection, onDeleteInspection, onPrintInspection, onPrintUniform }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterType, setFilterType] = useState("all"); // all, issues, ok
+  const [dateRange, setDateRange] = useState("all"); // all, today, week, month
+
+  // Filtrování a vyhledávání
+  const filteredInspections = useMemo(() => {
+    return savedInspections.filter(insp => {
+      // Filtr podle typu
+      if (filterType !== "all") {
+        const hasIssues = insp.couriers.some(c => getCourierResult(c).tone !== "ok");
+        if (filterType === "issues" && !hasIssues) return false;
+        if (filterType === "ok" && hasIssues) return false;
+      }
+
+      // Filtr podle data
+      if (dateRange !== "all") {
+        const inspDate = new Date(insp.date);
+        const now = new Date();
+        const daysDiff = Math.floor((now - inspDate) / (1000 * 60 * 60 * 24));
+
+        if (dateRange === "today" && daysDiff !== 0) return false;
+        if (dateRange === "week" && daysDiff > 7) return false;
+        if (dateRange === "month" && daysDiff > 30) return false;
+      }
+
+      // Vyhledávání
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const searchableText = [
+          insp.date,
+          insp.depot,
+          insp.inspector,
+          insp.shift,
+          ...insp.couriers.map(c => [c.name, c.route, c.vehicle].join(" "))
+        ].join(" ").toLowerCase();
+
+        if (!searchableText.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [savedInspections, searchQuery, filterType, dateRange]);
+
   if (savedInspections.length === 0) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
@@ -1296,9 +1765,103 @@ function HistoryView({ savedInspections, onLoadInspection, onDeleteInspection, o
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">Historie kontrol</h2>
-        <p className="text-slate-500">Všechny uložené kontroly · celkem {savedInspections.length}</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">Historie kontrol</h2>
+            <p className="text-slate-500">
+              Zobrazeno {filteredInspections.length} z {savedInspections.length} kontrol
+            </p>
+          </div>
+        </div>
+
+        {/* Vyhledávání a filtry */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* Vyhledávání */}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Hledat kurýra, trasu, depo..."
+                className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-slate-400"
+              />
+            </div>
+
+            {/* Filtr podle výsledku */}
+            <select
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+            >
+              <option value="all">Všechny kontroly</option>
+              <option value="issues">Jen s výhradami</option>
+              <option value="ok">Jen bez výhrad</option>
+            </select>
+
+            {/* Filtr podle data */}
+            <select
+              value={dateRange}
+              onChange={e => setDateRange(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+            >
+              <option value="all">Celá historie</option>
+              <option value="today">Dnes</option>
+              <option value="week">Poslední týden</option>
+              <option value="month">Poslední měsíc</option>
+            </select>
+          </div>
+
+          {/* Aktivní filtry */}
+          {(searchQuery || filterType !== "all" || dateRange !== "all") && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+              <span className="text-xs font-medium text-slate-500">Filtrováno:</span>
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                >
+                  "{searchQuery}" <X className="h-3 w-3" />
+                </button>
+              )}
+              {filterType !== "all" && (
+                <button
+                  onClick={() => setFilterType("all")}
+                  className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                >
+                  {filterType === "issues" ? "S výhradami" : "Bez výhrad"} <X className="h-3 w-3" />
+                </button>
+              )}
+              {dateRange !== "all" && (
+                <button
+                  onClick={() => setDateRange("all")}
+                  className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                >
+                  {dateRange === "today" ? "Dnes" : dateRange === "week" ? "Týden" : "Měsíc"} <X className="h-3 w-3" />
+                </button>
+              )}
+              <button
+                onClick={() => { setSearchQuery(""); setFilterType("all"); setDateRange("all"); }}
+                className="text-xs font-medium text-slate-500 hover:text-slate-700 underline"
+              >
+                Vymazat vše
+              </button>
+            </div>
+          )}
+        </div>
+
+        {filteredInspections.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+            <p className="text-slate-500">Žádné kontroly nevyhovují filtrům.</p>
+            <button
+              onClick={() => { setSearchQuery(""); setFilterType("all"); setDateRange("all"); }}
+              className="mt-2 text-sm font-medium text-slate-600 hover:text-slate-900 underline"
+            >
+              Vymazat filtry
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1317,7 +1880,7 @@ function HistoryView({ savedInspections, onLoadInspection, onDeleteInspection, o
               </tr>
             </thead>
             <tbody>
-              {[...savedInspections].reverse().map((insp, i) => {
+              {[...filteredInspections].reverse().map((insp, i) => {
                 const ok = insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
                 const fail = insp.couriers.length - ok;
                 const pct = insp.couriers.length > 0 ? Math.round(ok / insp.couriers.length * 100) : 100;
@@ -1360,6 +1923,464 @@ function HistoryView({ savedInspections, onLoadInspection, onDeleteInspection, o
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── COURIERS VIEW ────────────────────────────────────────────────────────────
+function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCourier, onDeleteCourier, onShowAddModal, onShowEditModal }) {
+  const [selectedCourier, setSelectedCourier] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Agregace historií kontrol pro každého kurýra
+  const courierHistory = useMemo(() => {
+    const map = {};
+
+    savedInspections.forEach(insp => {
+      insp.couriers.forEach(c => {
+        const name = c.name?.trim() || "Bez jména";
+        if (!map[name]) {
+          map[name] = {
+            totalInspections: 0,
+            totalIssues: 0,
+            lastInspection: null,
+            history: []
+          };
+        }
+
+        map[name].totalInspections += 1;
+        if (getCourierResult(c).tone !== "ok") map[name].totalIssues += 1;
+
+        const inspDate = new Date(insp.date);
+        if (!map[name].lastInspection || inspDate > new Date(map[name].lastInspection)) {
+          map[name].lastInspection = insp.date;
+        }
+
+        map[name].history.push({
+          date: insp.date,
+          result: getCourierResult(c),
+          route: c.route,
+          vehicle: c.vehicle,
+          checks: c.checks,
+          inspection: insp
+        });
+      });
+    });
+
+    return map;
+  }, [savedInspections]);
+
+  // Spojení kartotéky s historií kontrol
+  const enrichedCouriers = useMemo(() => {
+    return couriersDB.map(courier => ({
+      ...courier,
+      history: courierHistory[courier.name] || { totalInspections: 0, totalIssues: 0, history: [] },
+      issueRate: courierHistory[courier.name]?.totalInspections > 0
+        ? Math.round((courierHistory[courier.name].totalIssues / courierHistory[courier.name].totalInspections) * 100)
+        : 0
+    }));
+  }, [couriersDB, courierHistory]);
+
+  const filteredCouriers = useMemo(() => {
+    if (!searchQuery.trim()) return enrichedCouriers;
+    const q = searchQuery.toLowerCase();
+    return enrichedCouriers.filter(c =>
+      c.name?.toLowerCase().includes(q) ||
+      c.phone?.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      c.primaryRoute?.toLowerCase().includes(q) ||
+      c.primaryVehicle?.toLowerCase().includes(q)
+    );
+  }, [enrichedCouriers, searchQuery]);
+
+  if (couriersDB.length === 0 && savedInspections.length === 0) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100">
+          <User className="h-8 w-8 text-slate-400" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold">Kartotéka kurýrů</h2>
+          <p className="mt-2 max-w-md text-slate-500">
+            Začni přidáním prvního kurýra do kartotéky.
+          </p>
+          <Button onClick={onShowAddModal} className="mt-4">
+            <Plus className="mr-2 h-4 w-4" /> Přidat kurýra
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedCourier) {
+    const courier = enrichedCouriers.find(c => c.id === selectedCourier);
+    if (!courier) {
+      setSelectedCourier(null);
+      return null;
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" onClick={() => setSelectedCourier(null)}>
+              ← Zpět
+            </Button>
+            <div>
+              <h2 className="text-2xl font-bold">{courier.name}</h2>
+              <p className="text-slate-500">
+                {courier.history.totalInspections} {courier.history.totalInspections === 1 ? "kontrola" : courier.history.totalInspections < 5 ? "kontroly" : "kontrol"}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => onShowEditModal(courier)}>
+              <PencilLine className="h-4 w-4 mr-1.5" /> Upravit profil
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => {
+              onDeleteCourier(courier.id);
+              setSelectedCourier(null);
+            }}>
+              <Trash2 className="h-4 w-4 mr-1.5" /> Smazat
+            </Button>
+          </div>
+        </div>
+
+        {/* Profil kurýra */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          {/* Základní info */}
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-4 font-bold">📋 Základní údaje</h3>
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs font-medium text-slate-500">Telefon</div>
+                <div className="mt-0.5 font-medium">{courier.phone || "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">Email</div>
+                <div className="mt-0.5 font-medium">{courier.email || "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">Hlavní trasa</div>
+                <div className="mt-0.5 font-medium">{courier.primaryRoute || "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">Hlavní vozidlo</div>
+                <div className="mt-0.5 font-medium">{courier.primaryVehicle || "—"}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Statistiky */}
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-4 font-bold">📊 Statistiky</h3>
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs font-medium text-slate-500">Kontrol celkem</div>
+                <div className="mt-0.5 text-2xl font-bold">{courier.history.totalInspections}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">Bez výhrad</div>
+                <div className="mt-0.5 text-2xl font-bold text-emerald-600">
+                  {courier.history.totalInspections - courier.history.totalIssues}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">S výhradami</div>
+                <div className="mt-0.5 text-2xl font-bold text-amber-600">
+                  {courier.history.totalIssues}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">Míra výhrad</div>
+                <div className={`mt-0.5 text-2xl font-bold ${
+                  courier.issueRate === 0 ? "text-emerald-600" :
+                  courier.issueRate < 30 ? "text-blue-600" :
+                  courier.issueRate < 60 ? "text-amber-600" : "text-rose-600"
+                }`}>
+                  {courier.issueRate}%
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Poznámky */}
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-4 font-bold">📝 Poznámky</h3>
+            <p className="text-sm text-slate-600 whitespace-pre-wrap">
+              {courier.notes || "Žádné poznámky"}
+            </p>
+          </div>
+        </div>
+
+        {/* Historie kontrol */}
+        {courier.history.history.length > 0 && (
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-4 font-bold">📅 Historie kontrol</h3>
+            <div className="space-y-2">
+              {courier.history.history.sort((a, b) => new Date(b.date) - new Date(a.date)).map((h, i) => {
+                const issueChecks = CHECKS.filter(ch => h.checks?.[ch.id]?.status !== "ok");
+                return (
+                  <div key={i} className="flex items-start gap-3 rounded-xl border border-slate-100 p-3 hover:bg-slate-50 transition">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                      h.result.tone === "ok" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                    }`}>
+                      {h.result.tone === "ok" ? "✓" : "✗"}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{formatDate(h.date)}</span>
+                        {h.route && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">{h.route}</span>}
+                        {h.vehicle && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">{h.vehicle}</span>}
+                      </div>
+                      {issueChecks.length > 0 && (
+                        <div className="mt-1 text-sm text-slate-600">
+                          Výhrady: {issueChecks.map(ch => ch.short).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                      h.result.tone === "ok" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                    }`}>
+                      {h.result.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold">👥 Kartotéka kurýrů</h2>
+          <p className="text-slate-500">
+            {filteredCouriers.length} {filteredCouriers.length === 1 ? "kurýr" : filteredCouriers.length < 5 ? "kurýři" : "kurýrů"} v databázi
+          </p>
+        </div>
+        <Button onClick={onShowAddModal}>
+          <Plus className="mr-2 h-4 w-4" /> Přidat kurýra
+        </Button>
+      </div>
+
+      {/* Vyhledávání */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Hledat kurýra..."
+          className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-9 pr-3 text-base outline-none focus:border-slate-400"
+        />
+      </div>
+
+      {/* Seznam kurýrů */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {filteredCouriers.map(courier => (
+          <button
+            key={courier.id}
+            onClick={() => setSelectedCourier(courier.id)}
+            className="rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm hover:border-slate-950 hover:shadow-lg transition active:scale-95"
+          >
+            <div className="mb-3 flex items-start justify-between">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                <User className="h-6 w-6" />
+              </div>
+              {courier.history.totalInspections > 0 && (
+                <span className={`rounded-full px-2 py-1 text-xs font-bold ${
+                  courier.issueRate === 0 ? "bg-emerald-100 text-emerald-700" :
+                  courier.issueRate < 30 ? "bg-blue-100 text-blue-700" :
+                  courier.issueRate < 60 ? "bg-amber-100 text-amber-700" :
+                  "bg-rose-100 text-rose-700"
+                }`}>
+                  {courier.issueRate}% výhrad
+                </span>
+              )}
+            </div>
+            <div className="font-bold text-lg mb-1">{courier.name}</div>
+            <div className="text-sm text-slate-500 space-y-1">
+              {courier.primaryRoute && <div>🚚 {courier.primaryRoute}</div>}
+              {courier.primaryVehicle && <div>🚗 {courier.primaryVehicle}</div>}
+              {courier.phone && <div>📞 {courier.phone}</div>}
+            </div>
+            {courier.history.totalInspections > 0 && (
+              <div className="mt-3 flex gap-2 text-xs">
+                <span className="rounded-full bg-slate-100 px-2 py-1 font-medium">
+                  {courier.history.totalInspections} {courier.history.totalInspections === 1 ? "kontrola" : "kontrol"}
+                </span>
+                <span className="rounded-full bg-emerald-50 text-emerald-700 px-2 py-1 font-medium">
+                  ✓ {courier.history.totalInspections - courier.history.totalIssues}
+                </span>
+                {courier.history.totalIssues > 0 && (
+                  <span className="rounded-full bg-amber-50 text-amber-700 px-2 py-1 font-medium">
+                    ✗ {courier.history.totalIssues}
+                  </span>
+                )}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {filteredCouriers.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+          <p className="text-slate-500">Žádní kurýři nevyhovují hledání.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── COURIER EDIT MODAL ───────────────────────────────────────────────────────
+function CourierEditModal({ courier, onSave, onClose }) {
+  const [formData, setFormData] = useState({
+    name: courier?.name || "",
+    phone: courier?.phone || "",
+    email: courier?.email || "",
+    primaryRoute: courier?.primaryRoute || "",
+    primaryVehicle: courier?.primaryVehicle || "",
+    notes: courier?.notes || "",
+  });
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!formData.name.trim()) {
+      alert("Vyplň jméno kurýra");
+      return;
+    }
+    onSave(formData);
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95 }}
+        animate={{ scale: 1 }}
+        exit={{ scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">
+              {courier ? "Upravit kurýra" : "Přidat kurýra"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Základní informace o kurýrovi
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl p-2 hover:bg-slate-100 transition"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">
+                Jméno a příjmení *
+              </span>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-slate-400"
+                placeholder="Jan Novák"
+                required
+              />
+            </label>
+
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">
+                Telefon
+              </span>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-slate-400"
+                placeholder="+420 123 456 789"
+              />
+            </label>
+
+            <label className="space-y-1.5 sm:col-span-2">
+              <span className="text-sm font-medium text-slate-700">
+                Email
+              </span>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-slate-400"
+                placeholder="jan.novak@email.cz"
+              />
+            </label>
+
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">
+                Hlavní trasa
+              </span>
+              <input
+                type="text"
+                value={formData.primaryRoute}
+                onChange={(e) => setFormData({ ...formData, primaryRoute: e.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-slate-400"
+                placeholder="12A"
+              />
+            </label>
+
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-slate-700">
+                Hlavní vozidlo (SPZ)
+              </span>
+              <input
+                type="text"
+                value={formData.primaryVehicle}
+                onChange={(e) => setFormData({ ...formData, primaryVehicle: e.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-slate-400"
+                placeholder="1AB 2345"
+              />
+            </label>
+
+            <label className="space-y-1.5 sm:col-span-2">
+              <span className="text-sm font-medium text-slate-700">
+                Poznámky
+              </span>
+              <textarea
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                rows={3}
+                className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-slate-400"
+                placeholder="Např. pracuje jen ranní směny, potřebuje opakovaný trénink..."
+              />
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Zrušit
+            </Button>
+            <Button type="submit">
+              <Save className="mr-2 h-4 w-4" />
+              {courier ? "Uložit změny" : "Přidat kurýra"}
+            </Button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
   );
 }
 
