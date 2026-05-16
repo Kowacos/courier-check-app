@@ -136,7 +136,7 @@ export async function fetchCouriers() {
   console.log("📥 Načítám kurýry ze Supabase...");
   const { data, error } = await supabase
     .from("couriers")
-    .select("data")
+    .select("*")
     .order("updated_at", { ascending: false });
     
   if (error) { 
@@ -146,6 +146,12 @@ export async function fetchCouriers() {
   }
   
   console.log("✅ Načteno kurýrů ze Supabase:", data?.length || 0);
+  console.log("📋 SUROVÁ DATA ZE SUPABASE (včetně metadata):");
+  data?.forEach((row, i) => {
+    console.log(`  [${i}] ID: ${row.id}, updated_at: ${row.updated_at}`);
+    console.log(`      Data:`, row.data);
+  });
+  
   return data.map((row) => row.data);
 }
 

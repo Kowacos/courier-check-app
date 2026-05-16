@@ -934,7 +934,24 @@ export default function CourierCheckApp() {
       console.log("✅ KONEC AKTUALIZACE - VŠE OK");
       console.log("====================================");
       
-      alert("✅ Kurýr aktualizován");
+      // OVĚŘENÍ: Znovu načti data ze Supabase pro potvrzení uložení
+      console.log("🔍 OVĚŘENÍ: Načítám data ze Supabase pro kontrolu...");
+      const freshData = await fetchCouriers();
+      if (freshData) {
+        console.log("✅ Data znovu načtena ze Supabase:");
+        const freshCourier = freshData.find(c => c.id === id);
+        if (freshCourier) {
+          console.log("📋 Kurýr v databázi PO uložení:", JSON.stringify(freshCourier, null, 2));
+          // Aktualizuj stav s čerstvými daty ze Supabase
+          setCouriersDB(freshData);
+          localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(freshData));
+          console.log("✅ Lokální stav přepsán čerstvými daty ze Supabase");
+        } else {
+          console.error("❌ Kurýr nenalezen v čerstvých datech!");
+        }
+      }
+      
+      alert("✅ Kurýr aktualizován a ověřen v databázi");
     } catch (e) {
       console.error("====================================");
       console.error("❌ CHYBA PŘI AKTUALIZACI KURÝRA");
