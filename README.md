@@ -1,11 +1,75 @@
-# React + Vite
+# 📋 Aplikace pro kontrolu kurýrů
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Jednoduchá webová aplikace pro evidenci kontrol kurýrů s automatickou synchronizací do cloudu.
 
-Currently, two official plugins are available:
+## 🚀 Jak to funguje
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### 1. **Kontrola**
+- Přidáš kurýry a vyplníš kontrolní body
+- Klikneš **"Uložit kontrolu"**
+- Hotovo!
+
+### 2. **Historie**
+- Všechny uložené kontroly
+- Možnost upravit starou kontrolu
+- Tisknout PDF reporty
+- Objednávka uniforem
+
+### 3. **Statistiky**
+- Grafy a trendy v čase
+- Top kurýři/trasy s výhradami
+- Porovnání období
+
+## 📱 Synchronizace
+
+Data se automaticky ukládají do **Supabase** cloudu, takže můžeš pracovat na mobilu, tabletu i počítači - všude máš aktuální data.
+
+## 🔧 Nastavení
+
+### 1. Vytvoř tabulku v Supabase
+
+Jdi na: https://supabase.com/dashboard/project/rtsixlupzbwdkjjecjwd/sql/new
+
+Zkopíruj a spusť SQL z souboru: `supabase-setup.sql`
+
+### 2. Spusť aplikaci
+
+```bash
+npm install
+npm run dev
+```
+
+Otevři: http://localhost:5173
+
+### 3. Deployment na Vercel
+
+Každý push na GitHub automaticky nasadí novou verzi.
+
+**Nezapomeň nastavit environment variables ve Vercelu:**
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+## 📝 Kontrolní body
+
+✅ Servisní kříže na balících  
+✅ Třídění vrácených balíků  
+✅ Čistota vozidla  
+✅ Uniforma (s evidencí velikostí)  
+✅ Stav vozidla  
+
+## 🎯 Funkce
+
+- ✅ Jednoduchá evidence kontrol
+- ✅ Automatické ukládání do cloudu
+- ✅ Historie všech kontrol
+- ✅ PDF reporty (kontrola, uniformy, statistiky)
+- ✅ Grafy a statistiky
+- ✅ Offline podpora (localStorage)
+- ✅ Responzivní design (mobil, tablet, PC)
+
+---
+
+Vytvořeno 2026 · Michal Přeček
 
 ## React Compiler
 

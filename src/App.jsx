@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  fetchArchive, insertArchiveEntry, updateArchiveEntry,
-  fetchDrafts, upsertDraft, deleteDraft as deleteDraftFromDB,
+  fetchArchive, insertArchiveEntry, updateArchiveEntry, deleteArchiveEntry
 } from "./supabaseService";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, FolderOpen, ChevronDown } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 
 function Button({ children, className = "", variant = "default", size = "md", ...props }) {
@@ -28,9 +27,8 @@ function Button({ children, className = "", variant = "default", size = "md", ..
 function Card({ children, className = "" }) { return <div className={`bg-white ${className}`}>{children}</div>; }
 function CardContent({ children, className = "" }) { return <div className={className}>{children}</div>; }
 
-const STORAGE_KEY = "courier-check-v1";
-const ARCHIVE_KEY = "courier-stats-archive-v1";
-const DRAFTS_KEY = "courier-drafts-v1";
+const STORAGE_KEY = "courier-current-v2";
+const SAVED_KEY = "courier-saved-v2";
 
 const CHECKS = [
   { id: "serviceCrosses", title: "Servisní kříže na balících", short: "Serv. kříže", description: "Kontrola, zda jsou na balících správně vyplněné servisní kříže.", quickNotes: ["Chybějící servisní kříž","Špatně vyplněný servisní kříž","Kurýr proškolen","Opraveno na místě","Nutná opakovaná kontrola"] },
@@ -626,53 +624,40 @@ export default function CourierCheckApp() {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState("check");
   const [printModal, setPrintModal] = useState(null);
-  const [archive, setArchive] = useState([]);
-  const [drafts, setDrafts] = useState([]);
-  const [showDrafts, setShowDrafts] = useState(false);
+  const [savedInspections, setSavedInspections] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Načti data z Supabase při startu
+  // Načti data při startu
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
       try {
-        // Načti archiv z Supabase
-        const archiveData = await fetchArchive();
-        if (archiveData) {
-          setArchive(archiveData);
-          localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archiveData));
+        // Načti uložené kontroly z Supabase
+        const savedData = await fetchArchive();
+        if (savedData) {
+          setSavedInspections(savedData);
+          localStorage.setItem(SAVED_KEY, JSON.stringify(savedData));
         } else {
           // Fallback na localStorage
-          const s = localStorage.getItem(ARCHIVE_KEY);
-          if (s) setArchive(JSON.parse(s));
+          const s = localStorage.getItem(SAVED_KEY);
+          if (s) setSavedInspections(JSON.parse(s));
         }
 
-        // Načti drafty z Supabase
-        const draftsData = await fetchDrafts();
-        if (draftsData) {
-          setDrafts(draftsData);
-          localStorage.setItem(DRAFTS_KEY, JSON.stringify(draftsData));
-        } else {
-          // Fallback na localStorage
-          const s = localStorage.getItem(DRAFTS_KEY);
-          if (s) setDrafts(JSON.parse(s));
-        }
-
-        // Načti aktuální kontrolu z localStorage
-        const s = localStorage.getItem(STORAGE_KEY);
-        if (s) {
-          const parsed = JSON.parse(s);
+        // Načti aktuální rozdělanou kontrolu z localStorage
+        const currentStr = localStorage.getItem(STORAGE_KEY);
+        if (currentStr) {
+          const parsed = JSON.parse(currentStr);
           setInspection(parsed);
         }
       } catch (e) {
         console.warn("Chyba při načítání dat:", e);
-        // Fallback na localStorage
         try {
-          const archiveStr = localStorage.getItem(ARCHIVE_KEY);
-          const draftsStr = localStorage.getItem(DRAFTS_KEY);
-          if (archiveStr) setArchive(JSON.parse(archiveStr));
-          if (draftsStr) setDrafts(JSON.parse(draftsStr));
-        } catch {}
+          const s = localStorage.getItem(SAVED_KEY);
+          if (s) setSavedInspections(JSON.parse(s));
+        } catch (parseError) {
+          console.error("Chyba při parsování localStorage:", parseError);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -680,10 +665,15 @@ export default function CourierCheckApp() {
     loadData();
   }, []);
 
-  // Synchronizuj localStorage (pro offline použití)
-  useEffect(() => { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }, [archive]);
-  useEffect(() => { localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts)); }, [drafts]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(inspection)); }, [inspection]);
+  // Auto-ukládání aktuální kontroly do localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(inspection));
+  }, [inspection]);
+
+  // Synchronizuj uložené kontroly do localStorage
+  useEffect(() => {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(savedInspections));
+  }, [savedInspections]);
 
   const activeCourier = inspection.couriers.find(c => c.id === activeCourierId) || null;
   const filteredCouriers = useMemo(() => {
@@ -698,44 +688,92 @@ export default function CourierCheckApp() {
   function updateCourier(id, fn) { setInspection(cur => ({ ...cur, couriers: cur.couriers.map(c => c.id === id ? fn(c) : c) })); }
   function deleteCourier(id) { setInspection(cur => ({ ...cur, couriers: cur.couriers.filter(c => c.id !== id) })); if (activeCourierId === id) setActiveCourierId(null); }
 
-  async function archiveAndReset() {
-    if (inspection.couriers.length === 0) { alert("Nejsou žádní kurýři k archivaci."); return; }
-    if (!window.confirm(`Archivovat tuto kontrolu (${inspection.couriers.length} kurýrů) a začít novou?`)) return;
+  // Uložit aktuální kontrolu
+  async function saveInspection() {
+    if (inspection.couriers.length === 0) {
+      alert("Nejsou žádní kurýři k uložení.");
+      return;
+    }
 
-    const archived = { ...inspection, archivedAt: new Date().toISOString() };
+    setIsSaving(true);
+    try {
+      const savedAt = new Date().toISOString();
+      const saved = {
+        ...inspection,
+        id: inspection.id || crypto.randomUUID(),
+        savedAt
+      };
 
-    // Ulož do Supabase
-    await insertArchiveEntry(archived);
+      // Ulož do Supabase
+      if (inspection.id) {
+        // Aktualizace existující
+        await updateArchiveEntry(saved);
+        setSavedInspections(prev => prev.map(s => s.id === saved.id ? saved : s));
+      } else {
+        // Nová kontrola
+        await insertArchiveEntry(saved);
+        setSavedInspections(prev => [saved, ...prev]);
+      }
 
-    // Aktualizuj lokální stav
-    setArchive(prev => [...prev, archived]);
-    setInspection({ date: todayISO(), depot: inspection.depot, inspector: inspection.inspector, shift: inspection.shift, note: "", couriers: [] });
+      // Resetuj aktuální kontrolu
+      setInspection({
+        date: todayISO(),
+        depot: inspection.depot,
+        inspector: inspection.inspector,
+        shift: inspection.shift,
+        note: "",
+        couriers: []
+      });
+      setActiveCourierId(null);
+
+      alert("✅ Kontrola uložena!");
+    } catch (e) {
+      console.error("Chyba při ukládání:", e);
+      alert("❌ Chyba při ukládání. Zkus to znovu.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // Začít novou prázdnou kontrolu
+  function newInspection() {
+    if (inspection.couriers.length > 0) {
+      if (!window.confirm("Začít novou kontrolu? Neuložené změny budou ztraceny.")) return;
+    }
+    setInspection({
+      date: todayISO(),
+      depot: inspection.depot,
+      inspector: inspection.inspector,
+      shift: "Ranní kontrola",
+      note: "",
+      couriers: []
+    });
     setActiveCourierId(null);
+    setActiveTab("check");
   }
 
-  function resetInspection() {
-    if (!window.confirm("Začít novou prázdnou kontrolu? Neuložená data se smažou.")) return;
-    setInspection({ date: todayISO(), depot: inspection.depot, inspector: inspection.inspector, shift: "Ranní kontrola", note: "", couriers: [] });
+  // Načíst kontrolu z historie pro úpravu
+  function loadInspection(saved) {
+    if (inspection.couriers.length > 0) {
+      if (!window.confirm(`Načíst kontrolu ze dne ${formatDate(saved.date)}? Aktuální neuložené změny budou ztraceny.`)) return;
+    }
+    setInspection({ ...saved });
     setActiveCourierId(null);
+    setActiveTab("check");
   }
 
-  function loadArchiveToEditor(insp) {
-    if (!window.confirm(`Načíst kontrolu ze dne ${formatDate(insp.date)} do editoru? Aktuální rozdělaná kontrola se přepíše.`)) return;
-    setInspection({ ...insp });
-    setActiveCourierId(null); setActiveTab("check");
-  }
+  // Smazat kontrolu z historie
+  async function deleteInspection(saved) {
+    if (!window.confirm(`Opravdu smazat kontrolu ze dne ${formatDate(saved.date)}?`)) return;
 
-  async function saveEditedBackToArchive() {
-    if (!window.confirm("Uložit změny zpět do archivu? Původní záznam se přepíše.")) return;
-    const archivedAt = inspection.archivedAt;
-    if (!archivedAt) { alert("Tato kontrola není z archivu."); return; }
-
-    // Ulož do Supabase
-    await updateArchiveEntry(inspection);
-
-    // Aktualizuj lokální stav
-    setArchive(prev => prev.map(a => a.archivedAt === archivedAt ? { ...inspection } : a));
-    alert("Uloženo do archivu.");
+    try {
+      await deleteArchiveEntry(saved.id);
+      setSavedInspections(prev => prev.filter(s => s.id !== saved.id));
+      alert("✅ Kontrola smazána");
+    } catch (e) {
+      console.error("Chyba při mazání:", e);
+      alert("❌ Chyba při mazání");
+    }
   }
 
   function addQuickNote(courierId, checkId, text) {
@@ -745,72 +783,7 @@ export default function CourierCheckApp() {
     });
   }
 
-  async function saveCurrentToDrafts(insp) {
-    // Přidá nebo aktualizuje aktuální kontrolu v seznamu draftů
-    const withId = insp.id ? insp : { ...insp, id: crypto.randomUUID() };
-
-    // Ulož do Supabase
-    await upsertDraft(withId);
-
-    // Aktualizuj lokální stav
-    setDrafts(cur => {
-      const exists = cur.find(d => d.id === withId.id);
-      if (exists) return cur.map(d => d.id === withId.id ? withId : d);
-      return [withId, ...cur];
-    });
-    return withId;
-  }
-
-  function switchDraft(id) {
-    // Ulož aktuální kontrolu do draftů a přepni na vybranou
-    saveCurrentToDrafts(inspection);
-    const draft = drafts.find(d => d.id === id);
-    if (draft) {
-      setInspection(draft);
-      setActiveCourierId(null);
-      setActiveTab("check");
-      setShowDrafts(false);
-    }
-  }
-
-  async function deleteDraft(id) {
-    if (window.confirm("Smazat tuto rozpracovanou kontrolu?")) {
-      // Smaž z Supabase
-      await deleteDraftFromDB(id);
-
-      // Aktualizuj lokální stav
-      setDrafts(cur => cur.filter(d => d.id !== id));
-    }
-  }
-
-  async function createNewDraft() {
-    // Ulož aktuální kontrolu a otevři prázdnou novou
-    await saveCurrentToDrafts(inspection);
-    const newInsp = { id: crypto.randomUUID(), date: todayISO(), depot: inspection.depot, inspector: inspection.inspector, shift: "Ranní kontrola", note: "", couriers: [], createdAt: new Date().toISOString() };
-    setInspection(newInsp);
-    setActiveCourierId(null);
-    setActiveTab("check");
-    setShowDrafts(false);
-  }
-
-  // Automaticky přidej/aktualizuj aktuální kontrolu v draftech při každé změně (jen pokud má id)
-  useEffect(() => {
-    if (!inspection.id) return;
-
-    // Debounce: ulož po 2 sekundách od poslední změny
-    const timer = setTimeout(async () => {
-      await upsertDraft(inspection);
-      setDrafts(cur => {
-        const exists = cur.find(d => d.id === inspection.id);
-        if (exists) return cur.map(d => d.id === inspection.id ? inspection : d);
-        return cur;
-      });
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [inspection]);
-
-  const isEditingArchived = !!inspection.archivedAt;
+  const isEditingExisting = !!inspection.id;
 
   if (isLoading) {
     return (
@@ -876,8 +849,7 @@ export default function CourierCheckApp() {
       </AnimatePresence>
 
       <header className="print-hide-on-print sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
-        {/* ── ŘÁDEK 1: Logo + Navigace + Rozpracované ── */}
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 pt-3 pb-2 sm:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           {/* Logo */}
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm">
@@ -885,96 +857,89 @@ export default function CourierCheckApp() {
             </div>
             <div className="hidden sm:block">
               <h1 className="text-lg font-bold tracking-tight leading-tight">Kontrola kurýrů</h1>
-              <p className="text-xs text-slate-400 leading-tight">Servisní kříže · vratky · vozidlo · uniforma</p>
+              <p className="text-xs text-slate-400 leading-tight">Jednoduchá evidence kontrol a statistiky</p>
             </div>
             <h1 className="sm:hidden text-base font-bold tracking-tight">Kurýři</h1>
           </div>
 
-          {/* Tab přepínač — uprostřed */}
+          {/* Tab přepínač */}
           <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-100 p-1">
             <button onClick={() => setActiveTab("check")}
               className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "check" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
               <ClipboardCheck className="h-4 w-4" />
               <span className="hidden xs:inline">Kontrola</span>
-              {isEditingArchived && <span className="rounded-full bg-amber-400 text-white text-xs px-1.5 py-0.5 hidden sm:inline">archiv</span>}
+            </button>
+            <button onClick={() => setActiveTab("history")}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "history" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              <Archive className="h-4 w-4" />
+              <span className="hidden xs:inline">Historie</span>
+              {savedInspections.length > 0 && <span className="rounded-full bg-slate-950 text-white text-xs px-1.5 py-0.5">{savedInspections.length}</span>}
             </button>
             <button onClick={() => setActiveTab("stats")}
               className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
               <BarChart2 className="h-4 w-4" />
               <span className="hidden xs:inline">Statistiky</span>
-              {archive.length > 0 && <span className="rounded-full bg-slate-950 text-white text-xs px-1.5 py-0.5">{archive.length}</span>}
             </button>
           </div>
 
-          {/* Tlačítko Rozpracované — vždy viditelné */}
-          <button onClick={() => setShowDrafts(cur => !cur)}
-            className="relative flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-200 transition shrink-0">
-            <FolderOpen className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Rozpracované</span>
-            {drafts.length > 0 && (
-              <span className="rounded-full bg-rose-500 text-white text-xs h-5 w-5 flex items-center justify-center">{drafts.length}</span>
-            )}
-            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDrafts ? "rotate-180" : ""}`} />
-          </button>
+          {/* Místo pro budoucí funkce */}
+          <div className="w-9"></div>
         </div>
 
-        {/* ── ŘÁDEK 2: Akční tlačítka ── */}
-        {(activeTab === "check" || (activeTab === "stats" && archive.length > 0)) && (
+        {/* Akční tlačítka */}
+        {activeTab === "check" && (
           <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 pb-3 sm:px-6 flex-wrap">
-            {activeTab === "check" && (
-              <>
-                <Button onClick={addCourier} size="sm">
-                  <Plus className="h-3.5 w-3.5 mr-1.5" />
-                  <span>Přidat kurýra</span>
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "inspection", inspection, archive: null })}>
-                  <FileText className="h-3.5 w-3.5 mr-1.5" />
-                  <span className="hidden sm:inline">Report kontroly</span>
-                  <span className="sm:hidden">Report</span>
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "uniform", inspection, archive: null })}>
-                  <Shirt className="h-3.5 w-3.5 mr-1.5" />
-                  <span className="hidden sm:inline">Objednávka uniforem</span>
-                  <span className="sm:hidden">Uniformy</span>
-                </Button>
-                {isEditingArchived
-                  ? <Button variant="success" size="sm" onClick={saveEditedBackToArchive}>
-                      <Save className="h-3.5 w-3.5 mr-1.5" />
-                      <span className="hidden sm:inline">Uložit do archivu</span>
-                      <span className="sm:hidden">Uložit</span>
-                    </Button>
-                  : <Button variant="success" size="sm" onClick={archiveAndReset}>
-                      <Archive className="h-3.5 w-3.5 mr-1.5" />
-                      <span className="hidden sm:inline">Archivovat a nová</span>
-                      <span className="sm:hidden">Archivovat</span>
-                    </Button>}
-              </>
-            )}
-            {activeTab === "stats" && archive.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "stats", inspection: null, archive })}>
-                <Printer className="h-3.5 w-3.5 mr-1.5" /> PDF statistik
-              </Button>
-            )}
+            <Button onClick={addCourier} size="sm">
+              <Plus className="h-3.5 w-3.5 mr-1.5" /> Přidat kurýra
+            </Button>
+            <Button variant="success" size="sm" onClick={saveInspection} disabled={isSaving || inspection.couriers.length === 0}>
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              {isSaving ? "Ukládám..." : isEditingExisting ? "Uložit změny" : "Uložit kontrolu"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={newInspection}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Nová kontrola
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "inspection", inspection, archive: savedInspections })}>
+              <FileText className="h-3.5 w-3.5 mr-1.5" />
+              <span className="hidden sm:inline">Report kontroly</span>
+              <span className="sm:hidden">Report</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "uniform", inspection, archive: null })}>
+              <Shirt className="h-3.5 w-3.5 mr-1.5" />
+              <span className="hidden sm:inline">Objednávka uniforem</span>
+              <span className="sm:hidden">Uniformy</span>
+            </Button>
+          </div>
+        )}
+        {activeTab === "stats" && savedInspections.length > 0 && (
+          <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 pb-3 sm:px-6 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => setPrintModal({ type: "stats", inspection: null, archive: savedInspections })}>
+              <Printer className="h-3.5 w-3.5 mr-1.5" /> PDF statistik
+            </Button>
           </div>
         )}
       </header>
 
-      {activeTab === "stats" ? (
+      {activeTab === "history" ? (
         <main className="print-hide-on-print mx-auto max-w-7xl px-4 py-5 sm:px-6">
-          <StatsView
-            archive={archive}
-            onClearArchive={() => { if (window.confirm("Smazat celý archiv statistik?")) setArchive([]); }}
-            onLoadToEditor={loadArchiveToEditor}
-            onPrintInspection={(insp) => setPrintModal({ type: "inspection", inspection: insp, archive })}
+          <HistoryView
+            savedInspections={savedInspections}
+            onLoadInspection={loadInspection}
+            onDeleteInspection={deleteInspection}
+            onPrintInspection={(insp) => setPrintModal({ type: "inspection", inspection: insp, archive: savedInspections })}
             onPrintUniform={(insp) => setPrintModal({ type: "uniform", inspection: insp, archive: null })}
           />
+        </main>
+      ) : activeTab === "stats" ? (
+        <main className="print-hide-on-print mx-auto max-w-7xl px-4 py-5 sm:px-6">
+          <StatsView archive={savedInspections} />
         </main>
       ) : (
         <main className="print-hide-on-print mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[390px_1fr]">
           <aside className="space-y-5">
-            {isEditingArchived && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-                ✏️ Upravuješ archivovanou kontrolu ze dne <strong>{formatDate(inspection.date)}</strong>. Po úpravách klikni „Uložit do archivu".
+            {isEditingExisting && (
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">
+                ✏️ Upravuješ uloženou kontrolu ze dne <strong>{formatDate(inspection.date)}</strong>. Po úpravách klikni „Uložit změny".
               </div>
             )}
             <Card className="rounded-3xl border-slate-200 shadow-sm">
@@ -1029,9 +994,6 @@ export default function CourierCheckApp() {
                     );
                   })}
                 </div>
-                <Button onClick={resetInspection} variant="ghost" className="w-full rounded-2xl text-slate-500">
-                  <RotateCcw className="mr-2 h-4 w-4" /> Nová prázdná kontrola
-                </Button>
               </CardContent>
             </Card>
           </aside>
@@ -1042,22 +1004,6 @@ export default function CourierCheckApp() {
           </section>
         </main>
       )}
-
-      {/* ─── DRAFT SWITCHER MODAL ───────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showDrafts && (
-          <motion.div key="dm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <DraftSwitcherModal
-              drafts={drafts}
-              currentId={inspection.id}
-              onSwitch={switchDraft}
-              onNew={createNewDraft}
-              onDelete={deleteDraft}
-              onClose={() => setShowDrafts(false)}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -1215,7 +1161,7 @@ function CourierEditor({ courier, updateCourier, deleteCourier, addQuickNote }) 
 }
 
 // ─── STATS VIEW ───────────────────────────────────────────────────────────────
-function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection, onPrintUniform }) {
+function StatsView({ archive }) {
   const [rangeWeeks, setRangeWeeks] = useState(8);
 
   const stats = useMemo(() => {
@@ -1260,14 +1206,11 @@ function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection,
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="text-2xl font-bold">Statistiky a trendy</h2><p className="text-slate-500">Z {stats.total} kontrol · {stats.totalCouriers} kurýrů celkem</p></div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-600">Trend:
-            <select value={rangeWeeks} onChange={e => setRangeWeeks(Number(e.target.value))} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm outline-none">
-              <option value={4}>4 týdny</option><option value={8}>8 týdnů</option><option value={12}>12 týdnů</option><option value={26}>26 týdnů</option>
-            </select>
-          </label>
-          <button onClick={onClearArchive} className="text-xs text-slate-400 hover:text-rose-500 transition">Smazat archiv</button>
-        </div>
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-600">Trend:
+          <select value={rangeWeeks} onChange={e => setRangeWeeks(Number(e.target.value))} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm outline-none">
+            <option value={4}>4 týdny</option><option value={8}>8 týdnů</option><option value={12}>12 týdnů</option><option value={26}>26 týdnů</option>
+          </select>
+        </label>
       </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1323,9 +1266,36 @@ function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection,
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── HISTORY VIEW ─────────────────────────────────────────────────────────────
+function HistoryView({ savedInspections, onLoadInspection, onDeleteInspection, onPrintInspection, onPrintUniform }) {
+  if (savedInspections.length === 0) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100">
+          <Archive className="h-8 w-8 text-slate-400" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold">Zatím žádné uložené kontroly</h2>
+          <p className="mt-2 max-w-md text-slate-500">
+            Po každé kontrole klikni na <strong>"Uložit kontrolu"</strong> a najdeš ji tady.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold">Historie kontrol</h2>
+        <p className="text-slate-500">Všechny uložené kontroly · celkem {savedInspections.length}</p>
+      </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-lg font-bold">Archiv kontrol</h3>
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full border-collapse text-sm text-left">
             <thead className="bg-slate-50">
@@ -1335,35 +1305,45 @@ function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection,
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold">Kontrolující</th>
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold">Směna</th>
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Kurýrů</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Výhrad</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Nevyhovělo</th>
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">% OK</th>
                 <th className="border-b border-slate-200 px-3 py-2 font-semibold text-center">Akce</th>
               </tr>
             </thead>
             <tbody>
-              {[...archive].reverse().map((insp, i) => {
+              {[...savedInspections].reverse().map((insp, i) => {
                 const ok = insp.couriers.filter(c => getCourierResult(c).tone === "ok").length;
+                const fail = insp.couriers.length - ok;
                 const pct = insp.couriers.length > 0 ? Math.round(ok / insp.couriers.length * 100) : 100;
                 return (
-                  <tr key={insp.archivedAt} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                  <tr key={insp.id || insp.savedAt} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
                     <td className="border-b border-slate-100 px-3 py-2 font-medium">{formatDate(insp.date)}</td>
                     <td className="border-b border-slate-100 px-3 py-2">{insp.depot}</td>
                     <td className="border-b border-slate-100 px-3 py-2">{insp.inspector}</td>
                     <td className="border-b border-slate-100 px-3 py-2">{insp.shift}</td>
                     <td className="border-b border-slate-100 px-3 py-2 text-center font-bold">{insp.couriers.length}</td>
-                    <td className="border-b border-slate-100 px-3 py-2 text-center font-bold text-amber-600">{insp.couriers.length - ok}</td>
-                    <td className={`border-b border-slate-100 px-3 py-2 text-center font-bold ${pct >= 80 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600"}`}>{pct}%</td>
+                    <td className={`border-b border-slate-100 px-3 py-2 text-center font-bold ${fail > 0 ? "text-amber-600" : "text-slate-400"}`}>
+                      {fail}
+                    </td>
+                    <td className={`border-b border-slate-100 px-3 py-2 text-center font-bold ${pct >= 80 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600"}`}>
+                      {pct}%
+                    </td>
                     <td className="border-b border-slate-100 px-2 py-1.5">
                       <div className="flex items-center gap-1.5 flex-wrap justify-center">
-                        <Button size="sm" variant="outline" onClick={() => onLoadToEditor(insp)}>
+                        <Button size="sm" variant="outline" onClick={() => onLoadInspection(insp)}>
                           <PencilLine className="h-3.5 w-3.5 mr-1" /> Upravit
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => onPrintInspection(insp)}>
-                          <FileText className="h-3.5 w-3.5 mr-1" /> Report
+                          <FileText className="h-3.5 w-3.5 mr-1" /> PDF
                         </Button>
                         <Button size="sm" variant="blue" onClick={() => onPrintUniform(insp)}>
                           <Shirt className="h-3.5 w-3.5 mr-1" /> Uniformy
                         </Button>
+                        <button
+                          onClick={() => onDeleteInspection(insp)}
+                          className="rounded-xl p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1377,70 +1357,5 @@ function StatsView({ archive, onClearArchive, onLoadToEditor, onPrintInspection,
   );
 }
 
-// ─── DRAFT SWITCHER MODAL ─────────────────────────────────────────────────────
-function DraftSwitcherModal({ drafts, currentId, onSwitch, onNew, onDelete, onClose }) {
-  useEffect(() => {
-    const h = (e) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", h);
-    return () => document.removeEventListener("keydown", h);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-        className="relative w-full max-w-lg mx-4 bg-white rounded-3xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div>
-            <h2 className="text-lg font-bold">Rozpracované kontroly</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Přepni mezi rozdělanými kontrolami nebo začni novou</p>
-          </div>
-          <button onClick={onClose} className="rounded-xl p-2 hover:bg-slate-100 transition">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="p-4 space-y-2 max-h-[60vh] overflow-auto">
-          {drafts.map(draft => {
-            const isCurrent = draft.id === currentId;
-            const filled = draft.couriers?.length ?? 0;
-            const issues = draft.couriers?.filter(c => getCourierResult(c).tone !== "ok").length ?? 0;
-            return (
-              <div key={draft.id}
-                className={`flex items-center gap-3 rounded-2xl border p-3 transition ${isCurrent ? "border-slate-950 bg-slate-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
-                <button className="flex-1 text-left" onClick={() => !isCurrent && onSwitch(draft.id)}>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-sm">{formatDate(draft.date) || "Bez data"}</span>
-                    {isCurrent && <span className="rounded-full bg-slate-950 text-white text-xs px-2 py-0.5">aktivní</span>}
-                    {draft.archivedAt && <span className="rounded-full bg-amber-100 text-amber-700 text-xs px-2 py-0.5">z archivu</span>}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    {draft.shift} · {draft.depot} · {filled} kurýrů
-                    {issues > 0 && <span className="text-amber-600 ml-1">· {issues} výhrad</span>}
-                  </div>
-                </button>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {!isCurrent && (
-                    <Button size="sm" variant="outline" onClick={() => onSwitch(draft.id)}>
-                      <FolderOpen className="h-3.5 w-3.5 mr-1" /> Otevřít
-                    </Button>
-                  )}
-                  {!isCurrent && (
-                    <button onClick={() => onDelete(draft.id)}
-                      className="rounded-xl p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="px-4 pb-4 pt-2 border-t border-slate-100">
-          <Button onClick={onNew} className="w-full gap-2">
-            <Plus className="h-4 w-4" /> Začít novou prázdnou kontrolu
-          </Button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
+// ─── DRAFT SWITCHER MODAL (REMOVED) ──────────────────────────────────────────
 
