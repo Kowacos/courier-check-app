@@ -4,7 +4,7 @@ import {
   fetchCouriers, insertCourier, updateCourier, deleteCourier
 } from "./supabaseService";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, Camera, Image as ImageIcon, User } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, Camera, Image as ImageIcon, User, UserPlus, TrendingUp, Award } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 
 function Button({ children, className = "", variant = "default", size = "md", ...props }) {
@@ -635,6 +635,7 @@ export default function CourierCheckApp() {
   const [couriersDB, setCouriersDB] = useState([]); // Kartotéka kurýrů
   const [showCourierModal, setShowCourierModal] = useState(false);
   const [editingCourierData, setEditingCourierData] = useState(null);
+  const [showSelectCouriersModal, setShowSelectCouriersModal] = useState(false);
 
   // Načti data při startu
   useEffect(() => {
@@ -713,6 +714,28 @@ export default function CourierCheckApp() {
 
   function updateInspection(field, value) { setInspection(cur => ({ ...cur, [field]: value })); }
   function addCourier() { const c = createEmptyCourier(); setInspection(cur => ({ ...cur, couriers: [c, ...cur.couriers] })); setActiveCourierId(c.id); }
+
+  // Přidat kurýry z kartotéky
+  function addCouriersFromDB(selectedCourierIds) {
+    const newCouriers = selectedCourierIds.map(id => {
+      const dbCourier = couriersDB.find(c => c.id === id);
+      if (!dbCourier) return null;
+
+      const courier = createEmptyCourier();
+      courier.name = dbCourier.name;
+      courier.route = dbCourier.primaryRoute || "";
+      courier.vehicle = dbCourier.primaryVehicle || "";
+
+      return courier;
+    }).filter(Boolean);
+
+    setInspection(cur => ({ ...cur, couriers: [...newCouriers, ...cur.couriers] }));
+
+    if (newCouriers.length > 0) {
+      setActiveCourierId(newCouriers[0].id);
+    }
+  }
+
   function updateCourier(id, fn) { setInspection(cur => ({ ...cur, couriers: cur.couriers.map(c => c.id === id ? fn(c) : c) })); }
   function deleteCourier(id) { setInspection(cur => ({ ...cur, couriers: cur.couriers.filter(c => c.id !== id) })); if (activeCourierId === id) setActiveCourierId(null); }
 
@@ -865,15 +888,34 @@ export default function CourierCheckApp() {
     if (!window.confirm("Opravdu smazat kurýra z kartotéky?")) return;
 
     try {
+      console.log("🗑️ Mažu kurýra:", id);
+
       // Smaž z Supabase
       await deleteCourier(id);
 
       // Aktualizuj lokální stav
-      setCouriersDB(prev => prev.filter(c => c.id !== id));
+      setCouriersDB(prev => {
+        const updated = prev.filter(c => c.id !== id);
+        console.log("✅ Kurýr smazán z lokálního stavu. Zbývá:", updated.length);
+        return updated;
+      });
+
+      alert("✅ Kurýr smazán");
     } catch (e) {
-      console.error("Chyba při mazání kurýra:", e);
+      console.error("❌ Chyba při mazání kurýra:", e);
       alert("❌ Chyba při mazání kurýra z cloudu");
     }
+  }
+
+  // Vyčistit localStorage cache (pro debug)
+  function clearLocalStorageCache() {
+    if (!window.confirm("Opravdu vyčistit lokální cache? Data se znovu načtou ze Supabase.")) return;
+
+    localStorage.removeItem(COURIERS_DB_KEY);
+    localStorage.removeItem(SAVED_KEY);
+
+    alert("✅ Cache vyčištěna. Obnovuji stránku...");
+    window.location.reload();
   }
 
   // Najít kurýra v kartotéce podle jména
@@ -889,7 +931,7 @@ export default function CourierCheckApp() {
   }
 
   // Nahrání fotky k výhradě
-  function addPhotoToCheck(courierId, checkId, file) {
+  const addPhotoToCheck = (courierId, checkId, file) => {
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       alert("Fotka je příliš velká (max 5 MB)");
@@ -913,10 +955,10 @@ export default function CourierCheckApp() {
       });
     };
     reader.readAsDataURL(file);
-  }
+  };
 
   // Smazání fotky
-  function deletePhoto(courierId, checkId, photoId) {
+  const deletePhoto = (courierId, checkId, photoId) => {
     updateCourier(courierId, c => ({
       ...c,
       checks: {
@@ -927,7 +969,7 @@ export default function CourierCheckApp() {
         }
       }
     }));
-  }
+  };
 
   const isEditingExisting = !!inspection.id;
 
@@ -994,6 +1036,21 @@ export default function CourierCheckApp() {
         )}
       </AnimatePresence>
 
+      {/* Modal pro výběr kurýrů z kartotéky */}
+      <AnimatePresence mode="wait">
+        {showSelectCouriersModal && (
+          <SelectCouriersModal
+            couriersDB={couriersDB}
+            savedInspections={savedInspections}
+            onSelect={(ids) => {
+              addCouriersFromDB(ids);
+              setShowSelectCouriersModal(false);
+            }}
+            onClose={() => setShowSelectCouriersModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Modal pro přidání/editaci kurýra */}
       <AnimatePresence mode="wait">
         {showCourierModal && (
@@ -1054,15 +1111,26 @@ export default function CourierCheckApp() {
               <User className="h-4 w-4" />
               <span className="hidden xs:inline">Kurýři</span>
             </button>
+            <button onClick={() => setActiveTab("leaderboard")}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "leaderboard" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
+              <Award className="h-4 w-4" />
+              <span className="hidden xs:inline">Žebříček</span>
+            </button>
             <button onClick={() => setActiveTab("stats")}
               className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${activeTab === "stats" ? "bg-white shadow-sm text-slate-950" : "text-slate-500 hover:text-slate-800"}`}>
-              <BarChart2 className="h-4 w-4" />
+              <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Statistiky</span>
             </button>
           </div>
 
           {/* Místo pro budoucí funkce */}
-          <div className="w-9"></div>
+          <button
+            onClick={clearLocalStorageCache}
+            className="rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition"
+            title="Vyčistit lokální cache"
+          >
+            🔄
+          </button>
         </div>
 
         {/* Akční tlačítka */}
@@ -1071,6 +1139,11 @@ export default function CourierCheckApp() {
             <Button onClick={addCourier} size="sm">
               <Plus className="h-3.5 w-3.5 mr-1.5" /> Přidat kurýra
             </Button>
+            {couriersDB.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setShowSelectCouriersModal(true)}>
+                <UserPlus className="h-3.5 w-3.5 mr-1.5" /> Přidat z kartotéky
+              </Button>
+            )}
             <Button variant="success" size="sm" onClick={saveInspection} disabled={isSaving || inspection.couriers.length === 0}>
               <Save className="h-3.5 w-3.5 mr-1.5" />
               {isSaving ? "Ukládám..." : isEditingExisting ? "Uložit změny" : "Uložit kontrolu"}
@@ -1133,6 +1206,10 @@ export default function CourierCheckApp() {
             onShowAddModal={() => { setShowCourierModal(true); setEditingCourierData(null); }}
             onShowEditModal={(courier) => { setShowCourierModal(true); setEditingCourierData(courier); }}
           />
+        </main>
+      ) : activeTab === "leaderboard" ? (
+        <main className="print-hide-on-print mx-auto max-w-7xl px-4 py-5 sm:px-6">
+          <LeaderboardView savedInspections={savedInspections} couriersDB={couriersDB} />
         </main>
       ) : (
         <main className="print-hide-on-print mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[390px_1fr]">
@@ -1440,10 +1517,54 @@ function StatsView({ archive }) {
       const inWeek = archive.filter(insp => { const d = new Date(insp.date); return d >= start && d <= end; });
       return { label, checked: inWeek.reduce((s, i) => s + i.couriers.length, 0), issues: inWeek.reduce((s, i) => s + i.couriers.filter(c => getCourierResult(c).tone !== "ok").length, 0) };
     });
+
+    // Porovnání období
+    const now30 = new Date(now);
+    now30.setDate(now30.getDate() - 30);
+    const now60 = new Date(now);
+    now60.setDate(now60.getDate() - 60);
+
+    const currentPeriod = archive.filter(insp => new Date(insp.date) >= now30);
+    const previousPeriod = archive.filter(insp => {
+      const d = new Date(insp.date);
+      return d >= now60 && d < now30;
+    });
+
+    const currentCouriers = currentPeriod.flatMap(i => i.couriers);
+    const previousCouriers = previousPeriod.flatMap(i => i.couriers);
+
+    const currentIssues = currentCouriers.filter(c => getCourierResult(c).tone !== "ok").length;
+    const previousIssues = previousCouriers.filter(c => getCourierResult(c).tone !== "ok").length;
+
+    const currentIssueRate = currentCouriers.length > 0 ? Math.round((currentIssues / currentCouriers.length) * 100) : 0;
+    const previousIssueRate = previousCouriers.length > 0 ? Math.round((previousIssues / previousCouriers.length) * 100) : 0;
+
+    const comparison = {
+      current: {
+        inspections: currentPeriod.length,
+        couriers: currentCouriers.length,
+        issues: currentIssues,
+        issueRate: currentIssueRate
+      },
+      previous: {
+        inspections: previousPeriod.length,
+        couriers: previousCouriers.length,
+        issues: previousIssues,
+        issueRate: previousIssueRate
+      },
+      diff: {
+        inspections: currentPeriod.length - previousPeriod.length,
+        couriers: currentCouriers.length - previousCouriers.length,
+        issues: currentIssues - previousIssues,
+        issueRate: currentIssueRate - previousIssueRate
+      }
+    };
+
     return {
       topCouriers: Object.values(courierMap).map(c => ({ ...c, issueRate: Math.round(c.issues / c.total * 100) })).sort((a, b) => b.issues - a.issues).slice(0, 10),
       topRoutes: Object.values(routeMap).map(r => ({ ...r, issueRate: Math.round(r.issues / r.total * 100) })).sort((a, b) => b.issues - a.issues).slice(0, 10),
       checkCounts, weeks, total: archive.length, totalCouriers: allEntries.length,
+      comparison
     };
   }, [archive, rangeWeeks]);
 
@@ -1463,6 +1584,103 @@ function StatsView({ archive }) {
             <option value={4}>4 týdny</option><option value={8}>8 týdnů</option><option value={12}>12 týdnů</option><option value={26}>26 týdnů</option>
           </select>
         </label>
+      </div>
+
+      {/* Porovnání období */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">📊 Porovnání období (poslední 30 dní vs. předchozích 30 dní)</h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="text-xs font-medium text-slate-500 mb-1">Kontrol</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold">{stats.comparison.current.inspections}</span>
+              {stats.comparison.diff.inspections !== 0 && (
+                <span className={`text-sm font-semibold ${
+                  stats.comparison.diff.inspections > 0 ? "text-emerald-600" : "text-rose-600"
+                }`}>
+                  {stats.comparison.diff.inspections > 0 ? "+" : ""}{stats.comparison.diff.inspections}
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Předchozí: {stats.comparison.previous.inspections}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="text-xs font-medium text-slate-500 mb-1">Kurýrů</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold">{stats.comparison.current.couriers}</span>
+              {stats.comparison.diff.couriers !== 0 && (
+                <span className={`text-sm font-semibold ${
+                  stats.comparison.diff.couriers > 0 ? "text-emerald-600" : "text-rose-600"
+                }`}>
+                  {stats.comparison.diff.couriers > 0 ? "+" : ""}{stats.comparison.diff.couriers}
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Předchozí: {stats.comparison.previous.couriers}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="text-xs font-medium text-slate-500 mb-1">Výhrad celkem</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-amber-600">{stats.comparison.current.issues}</span>
+              {stats.comparison.diff.issues !== 0 && (
+                <span className={`text-sm font-semibold ${
+                  stats.comparison.diff.issues < 0 ? "text-emerald-600" : "text-rose-600"
+                }`}>
+                  {stats.comparison.diff.issues > 0 ? "+" : ""}{stats.comparison.diff.issues}
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Předchozí: {stats.comparison.previous.issues}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="text-xs font-medium text-slate-500 mb-1">% výhrad</div>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-2xl font-bold ${
+                stats.comparison.current.issueRate === 0 ? "text-emerald-600" :
+                stats.comparison.current.issueRate < 20 ? "text-blue-600" :
+                stats.comparison.current.issueRate < 40 ? "text-amber-600" :
+                "text-rose-600"
+              }`}>
+                {stats.comparison.current.issueRate}%
+              </span>
+              {stats.comparison.diff.issueRate !== 0 && (
+                <span className={`text-sm font-semibold flex items-center gap-0.5 ${
+                  stats.comparison.diff.issueRate < 0 ? "text-emerald-600" : "text-rose-600"
+                }`}>
+                  {stats.comparison.diff.issueRate < 0 ? (
+                    <>↓ {Math.abs(stats.comparison.diff.issueRate)}pp</>
+                  ) : (
+                    <>↑ +{stats.comparison.diff.issueRate}pp</>
+                  )}
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Předchozí: {stats.comparison.previous.issueRate}%
+            </div>
+          </div>
+        </div>
+
+        {/* Trend message */}
+        {stats.comparison.diff.issueRate < -5 && (
+          <div className="mt-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
+            <strong>✅ Skvělý trend!</strong> Počet výhrad klesl o {Math.abs(stats.comparison.diff.issueRate)} procentních bodů.
+          </div>
+        )}
+        {stats.comparison.diff.issueRate > 5 && (
+          <div className="mt-4 rounded-xl bg-rose-50 border border-rose-200 p-3 text-sm text-rose-800">
+            <strong>⚠️ Pozor!</strong> Počet výhrad stoupl o {stats.comparison.diff.issueRate} procentních bodů.
+          </div>
+        )}
       </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1926,6 +2144,244 @@ function HistoryView({ savedInspections, onLoadInspection, onDeleteInspection, o
   );
 }
 
+// ─── LEADERBOARD VIEW ─────────────────────────────────────────────────────────
+function LeaderboardView({ savedInspections, couriersDB }) {
+  const [periodWeeks, setPeriodWeeks] = useState(4);
+
+  // Vypočítej žebříček kurýrů
+  const leaderboard = useMemo(() => {
+    const weeksAgo = new Date();
+    weeksAgo.setDate(weeksAgo.getDate() - periodWeeks * 7);
+
+    const periodInspections = savedInspections.filter(insp => new Date(insp.date) >= weeksAgo);
+
+    const courierMap = {};
+
+    periodInspections.forEach(insp => {
+      insp.couriers.forEach(c => {
+        const name = c.name?.trim() || "Bez jména";
+        if (!courierMap[name]) {
+          courierMap[name] = {
+            name,
+            totalInspections: 0,
+            passedInspections: 0,
+            failedInspections: 0,
+            totalIssues: 0,
+            issueRate: 0,
+            dbCourier: couriersDB.find(dbc => dbc.name.trim() === name)
+          };
+        }
+
+        courierMap[name].totalInspections += 1;
+
+        const result = getCourierResult(c);
+        if (result.tone === "ok") {
+          courierMap[name].passedInspections += 1;
+        } else {
+          courierMap[name].failedInspections += 1;
+
+          // Spočítej konkrétní výhrady
+          CHECKS.forEach(check => {
+            if (c.checks?.[check.id]?.status !== "ok") {
+              courierMap[name].totalIssues += 1;
+            }
+          });
+        }
+      });
+    });
+
+    // Vypočítej míru výhrad
+    Object.values(courierMap).forEach(courier => {
+      courier.issueRate = courier.totalInspections > 0
+        ? Math.round((courier.failedInspections / courier.totalInspections) * 100)
+        : 0;
+    });
+
+    return Object.values(courierMap);
+  }, [savedInspections, couriersDB, periodWeeks]);
+
+  // Top 10 nejlepších (nejméně výhrad)
+  const topCouriers = useMemo(() => {
+    return [...leaderboard]
+      .filter(c => c.totalInspections >= 3) // Minimálně 3 kontroly
+      .sort((a, b) => a.issueRate - b.issueRate || b.totalInspections - a.totalInspections)
+      .slice(0, 10);
+  }, [leaderboard]);
+
+  // Top 10 nejhorších (nejvíc výhrad)
+  const bottomCouriers = useMemo(() => {
+    return [...leaderboard]
+      .filter(c => c.totalInspections >= 3) // Minimálně 3 kontroly
+      .sort((a, b) => b.issueRate - a.issueRate || a.totalInspections - b.totalInspections)
+      .slice(0, 10);
+  }, [leaderboard]);
+
+  if (leaderboard.length === 0) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100">
+          <Award className="h-8 w-8 text-slate-400" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold">Zatím žádné statistiky</h2>
+          <p className="mt-2 max-w-md text-slate-500">
+            Žebříček se vytvoří po uložení kontrol.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold">🏆 Žebříček kurýrů</h2>
+          <p className="text-slate-500">
+            Hodnocení {leaderboard.length} kurýrů za vybrané období
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+          Období:
+          <select
+            value={periodWeeks}
+            onChange={e => setPeriodWeeks(Number(e.target.value))}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm outline-none"
+          >
+            <option value={1}>Poslední týden</option>
+            <option value={4}>Poslední měsíc</option>
+            <option value={12}>Poslední 3 měsíce</option>
+            <option value={26}>Poslední 6 měsíců</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Top 10 nejlepších */}
+        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold text-emerald-900 flex items-center gap-2">
+            <Award className="h-5 w-5" />
+            🥇 Top 10 - Nejlepší kurýři
+          </h3>
+          <div className="space-y-2">
+            {topCouriers.length === 0 ? (
+              <p className="text-sm text-emerald-700">Nedostatek dat (minimálně 3 kontroly)</p>
+            ) : (
+              topCouriers.map((courier, i) => (
+                <div
+                  key={courier.name}
+                  className={`flex items-center gap-3 rounded-xl p-3 ${
+                    i === 0 ? "bg-amber-100 border-2 border-amber-300" :
+                    i === 1 ? "bg-slate-200 border border-slate-300" :
+                    i === 2 ? "bg-orange-100 border border-orange-200" :
+                    "bg-white border border-emerald-100"
+                  }`}
+                >
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                    i === 0 ? "bg-amber-500 text-white" :
+                    i === 1 ? "bg-slate-400 text-white" :
+                    i === 2 ? "bg-orange-400 text-white" :
+                    "bg-emerald-500 text-white"
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold truncate">{courier.name}</div>
+                    <div className="text-xs text-slate-600">
+                      {courier.totalInspections} {courier.totalInspections === 1 ? "kontrola" : "kontrol"} · {courier.passedInspections}× OK
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-lg font-bold ${
+                      courier.issueRate === 0 ? "text-emerald-600" : "text-slate-600"
+                    }`}>
+                      {courier.issueRate}%
+                    </div>
+                    <div className="text-xs text-slate-500">výhrad</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Top 10 nejhorších */}
+        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold text-rose-900 flex items-center gap-2">
+            <Award className="h-5 w-5" />
+            ⚠️ Top 10 - Potřebují zlepšení
+          </h3>
+          <div className="space-y-2">
+            {bottomCouriers.length === 0 ? (
+              <p className="text-sm text-rose-700">Nedostatek dat (minimálně 3 kontroly)</p>
+            ) : (
+              bottomCouriers.map((courier, i) => (
+                <div
+                  key={courier.name}
+                  className="flex items-center gap-3 rounded-xl border border-rose-100 bg-white p-3"
+                >
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                    courier.issueRate >= 80 ? "bg-rose-600 text-white" :
+                    courier.issueRate >= 50 ? "bg-amber-500 text-white" :
+                    "bg-slate-400 text-white"
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold truncate">{courier.name}</div>
+                    <div className="text-xs text-slate-600">
+                      {courier.totalInspections} {courier.totalInspections === 1 ? "kontrola" : "kontrol"} · {courier.failedInspections}× výhrady
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-lg font-bold ${
+                      courier.issueRate >= 80 ? "text-rose-600" :
+                      courier.issueRate >= 50 ? "text-amber-600" :
+                      "text-slate-600"
+                    }`}>
+                      {courier.issueRate}%
+                    </div>
+                    <div className="text-xs text-slate-500">výhrad</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Celková statistika */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 font-bold">📊 Celková statistika</h3>
+        <div className="grid gap-4 sm:grid-cols-4">
+          <div>
+            <div className="text-2xl font-bold">{leaderboard.length}</div>
+            <div className="text-sm text-slate-600">Kurýrů celkem</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-emerald-600">
+              {leaderboard.filter(c => c.issueRate === 0).length}
+            </div>
+            <div className="text-sm text-slate-600">Bez jediné výhrady</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-amber-600">
+              {leaderboard.filter(c => c.issueRate > 0 && c.issueRate < 50).length}
+            </div>
+            <div className="text-sm text-slate-600">S občasnými výhradami</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-rose-600">
+              {leaderboard.filter(c => c.issueRate >= 50).length}
+            </div>
+            <div className="text-sm text-slate-600">Potřebují pozornost</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── COURIERS VIEW ────────────────────────────────────────────────────────────
 function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCourier, onDeleteCourier, onShowAddModal, onShowEditModal }) {
   const [selectedCourier, setSelectedCourier] = useState(null);
@@ -2232,6 +2688,256 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
         </div>
       )}
     </div>
+  );
+}
+
+// ─── SELECT COURIERS MODAL ────────────────────────────────────────────────────
+function SelectCouriersModal({ couriersDB, savedInspections, onSelect, onClose }) {
+  const [selected, setSelected] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Vypočítej statistiky pro každého kurýra (smart alerts)
+  const couriersWithStats = useMemo(() => {
+    return couriersDB.map(courier => {
+      // Najdi všechny kontroly tohoto kurýra
+      const courierInspections = [];
+      savedInspections.forEach(insp => {
+        const found = insp.couriers.find(c =>
+          c.name?.trim().toLowerCase() === courier.name?.trim().toLowerCase()
+        );
+        if (found) {
+          courierInspections.push({ ...found, date: insp.date });
+        }
+      });
+
+      // Vypočítej statistiky
+      const totalInspections = courierInspections.length;
+      const issuesCount = courierInspections.filter(c => getCourierResult(c).tone !== "ok").length;
+      const lastInspection = courierInspections.length > 0
+        ? courierInspections.sort((a, b) => new Date(b.date) - new Date(a.date))[0].date
+        : null;
+
+      // Kolik dní od poslední kontroly
+      const daysSinceLastInspection = lastInspection
+        ? Math.floor((new Date() - new Date(lastInspection)) / (1000 * 60 * 60 * 24))
+        : null;
+
+      // Výhrady za poslední měsíc
+      const monthAgo = new Date();
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+      const recentIssues = courierInspections.filter(c =>
+        new Date(c.date) >= monthAgo && getCourierResult(c).tone !== "ok"
+      ).length;
+
+      return {
+        ...courier,
+        stats: {
+          totalInspections,
+          issuesCount,
+          lastInspection,
+          daysSinceLastInspection,
+          recentIssues
+        }
+      };
+    });
+  }, [couriersDB, savedInspections]);
+
+  const filteredCouriers = useMemo(() => {
+    if (!searchQuery.trim()) return couriersWithStats;
+    const q = searchQuery.toLowerCase();
+    return couriersWithStats.filter(c =>
+      c.name?.toLowerCase().includes(q) ||
+      c.primaryRoute?.toLowerCase().includes(q) ||
+      c.primaryVehicle?.toLowerCase().includes(q)
+    );
+  }, [couriersWithStats, searchQuery]);
+
+  function toggleCourier(id) {
+    setSelected(prev =>
+      prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]
+    );
+  }
+
+  function toggleAll() {
+    if (selected.length === filteredCouriers.length) {
+      setSelected([]);
+    } else {
+      setSelected(filteredCouriers.map(c => c.id));
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95 }}
+        animate={{ scale: 1 }}
+        exit={{ scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-4xl max-h-[90vh] rounded-3xl border border-slate-200 bg-white shadow-2xl flex flex-col"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-2xl font-bold">Přidat kurýry z kartotéky</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Vyber kurýry, které chceš přidat do kontroly
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl p-2 hover:bg-slate-100 transition"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Search & Select All */}
+        <div className="px-6 py-4 border-b border-slate-100 space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Hledat kurýra..."
+              className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-slate-400"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={toggleAll}
+              className="text-sm font-medium text-slate-600 hover:text-slate-900 underline"
+            >
+              {selected.length === filteredCouriers.length ? "Zrušit vše" : "Vybrat vše"}
+            </button>
+            <span className="text-sm text-slate-500">
+              Vybráno: {selected.length} / {filteredCouriers.length}
+            </span>
+          </div>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {filteredCouriers.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-slate-500">
+              Žádní kurýři nenalezeni
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredCouriers.map(courier => {
+                const isSelected = selected.includes(courier.id);
+                const { stats } = courier;
+
+                // Smart alerts
+                const hasRecentIssues = stats.recentIssues >= 3;
+                const notCheckedLongTime = stats.daysSinceLastInspection && stats.daysSinceLastInspection > 14;
+                const hasAlerts = hasRecentIssues || notCheckedLongTime;
+
+                return (
+                  <button
+                    key={courier.id}
+                    onClick={() => toggleCourier(courier.id)}
+                    className={`w-full rounded-2xl border p-4 text-left transition ${
+                      isSelected
+                        ? "border-slate-950 bg-slate-50"
+                        : "border-slate-200 bg-white hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {/* Checkbox */}
+                      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition mt-0.5 ${
+                        isSelected
+                          ? "border-slate-950 bg-slate-950"
+                          : "border-slate-300"
+                      }`}>
+                        {isSelected && <CheckCircle2 className="h-4 w-4 text-white" />}
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-semibold text-lg">{courier.name}</span>
+                          {hasAlerts && (
+                            <span className="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-xs font-bold">
+                              ⚠
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 text-sm text-slate-600 mb-2">
+                          {courier.primaryRoute && (
+                            <span className="rounded-lg bg-slate-100 px-2 py-1">
+                              🚚 {courier.primaryRoute}
+                            </span>
+                          )}
+                          {courier.primaryVehicle && (
+                            <span className="rounded-lg bg-slate-100 px-2 py-1">
+                              🚗 {courier.primaryVehicle}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Smart Alerts */}
+                        {hasAlerts && (
+                          <div className="space-y-1 mt-2">
+                            {hasRecentIssues && (
+                              <div className="flex items-center gap-1.5 text-xs text-amber-700">
+                                <span className="font-bold">⚠️</span>
+                                <span>
+                                  {stats.recentIssues}× výhrady za poslední měsíc
+                                </span>
+                              </div>
+                            )}
+                            {notCheckedLongTime && (
+                              <div className="flex items-center gap-1.5 text-xs text-blue-700">
+                                <span className="font-bold">📅</span>
+                                <span>
+                                  Poslední kontrola: před {stats.daysSinceLastInspection} dny
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Stats */}
+                        {stats.totalInspections > 0 && (
+                          <div className="flex gap-3 mt-2 text-xs text-slate-500">
+                            <span>{stats.totalInspections} kontrol</span>
+                            {stats.issuesCount > 0 && (
+                              <span className="text-amber-600 font-medium">
+                                {stats.issuesCount}× výhrady
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Zrušit
+          </Button>
+          <Button
+            onClick={() => onSelect(selected)}
+            disabled={selected.length === 0}
+          >
+            Přidat {selected.length > 0 && `(${selected.length})`}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
