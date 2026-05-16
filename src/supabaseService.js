@@ -137,8 +137,8 @@ export async function fetchCouriers() {
   const { data, error } = await supabase
     .from("couriers")
     .select("*")
-    .order("updated_at", { ascending: false });
-    
+    .order("created_at", { ascending: false }); // Třídění podle data vytvoření, ne úpravy
+
   if (error) { 
     console.error("❌ Chyba při načítání kurýrů z Supabase:", error.message);
     console.error("Detail:", error);

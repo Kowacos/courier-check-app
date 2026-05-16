@@ -942,10 +942,19 @@ export default function CourierCheckApp() {
         const freshCourier = freshData.find(c => c.id === id);
         if (freshCourier) {
           console.log("📋 Kurýr v databázi PO uložení:", JSON.stringify(freshCourier, null, 2));
-          // Aktualizuj stav s čerstvými daty ze Supabase
-          setCouriersDB(freshData);
-          localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(freshData));
-          console.log("✅ Lokální stav přepsán čerstvými daty ze Supabase");
+          
+          // ⚠️ DŮLEŽITÉ: Zachováme původní pořadí, jen aktualizujeme data
+          setCouriersDB(prev => {
+            const newList = prev.map(c => {
+              if (c.id === id) {
+                return freshCourier; // Aktualizovaná data z databáze
+              }
+              return c; // Ostatní zůstávají stejně
+            });
+            localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(newList));
+            console.log("✅ Lokální stav aktualizován (pořadí zachováno)");
+            return newList;
+          });
         } else {
           console.error("❌ Kurýr nenalezen v čerstvých datech!");
         }
