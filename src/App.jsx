@@ -653,29 +653,46 @@ export default function CourierCheckApp() {
     async function loadData() {
       setIsLoading(true);
       try {
+        console.log("====================================");
+        console.log("🔄 NAČÍTÁNÍ DAT PO STARTU/REFRESHI");
+        console.log("====================================");
+        
         // Načti uložené kontroly z Supabase
         const savedData = await fetchArchive();
         if (savedData) {
+          console.log("✅ Načteny kontroly ze Supabase:", savedData.length);
           setSavedInspections(savedData);
           localStorage.setItem(SAVED_KEY, JSON.stringify(savedData));
         } else {
           // Fallback na localStorage
+          console.log("⚠️ Supabase nedostupné, načítám kontroly z localStorage");
           const s = localStorage.getItem(SAVED_KEY);
           if (s) setSavedInspections(JSON.parse(s));
         }
 
         // Načti kartotéku kurýrů z Supabase
+        console.log("📥 Načítám kurýry ze Supabase...");
         const couriersData = await fetchCouriers();
         if (couriersData) {
+          console.log("✅ Načteni kurýři ze Supabase:", couriersData.length);
+          console.log("📋 První kurýr:", JSON.stringify(couriersData[0], null, 2));
           setCouriersDB(couriersData);
           localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(couriersData));
+          console.log("💾 Kurýři uloženi do localStorage");
         } else {
           // Fallback na localStorage
+          console.log("⚠️ Supabase nedostupné, načítám kurýry z localStorage");
           const couriersStr = localStorage.getItem(COURIERS_DB_KEY);
           if (couriersStr) {
-            setCouriersDB(JSON.parse(couriersStr));
+            const parsed = JSON.parse(couriersStr);
+            console.log("📋 Načteno kurýrů z localStorage:", parsed.length);
+            setCouriersDB(parsed);
           }
         }
+        
+        console.log("====================================");
+        console.log("✅ NAČÍTÁNÍ DAT DOKONČENO");
+        console.log("====================================");
 
         // Načti aktuální rozdělanou kontrolu z localStorage
         const currentStr = localStorage.getItem(STORAGE_KEY);
@@ -877,34 +894,53 @@ export default function CourierCheckApp() {
   // Upravit kurýra v kartotéce
   async function updateCourierInDB(id, updates) {
     try {
-      console.log("📝 Aktualizuji kurýra:", id, updates);
-      
+      console.log("====================================");
+      console.log("📝 ZAČÁTEK AKTUALIZACE KURÝRA");
+      console.log("ID:", id);
+      console.log("Změny:", updates);
+      console.log("====================================");
+
       // Najdi kurýra a uprav ho
-      const updatedCourier = couriersDB.find(c => c.id === id);
-      if (!updatedCourier) {
-        console.error("❌ Kurýr nenalezen:", id);
+      const currentCourier = couriersDB.find(c => c.id === id);
+      if (!currentCourier) {
+        console.error("❌ Kurýr nenalezen v couriersDB:", id);
+        console.error("Dostupní kurýři:", couriersDB.map(c => ({ id: c.id, name: c.name })));
         return;
       }
 
-      const updated = { ...updatedCourier, ...updates };
-      
-      console.log("💾 Ukládám do Supabase:", updated);
+      console.log("📋 Nalezen kurýr PŘED úpravou:", JSON.stringify(currentCourier, null, 2));
+
+      const updated = { ...currentCourier, ...updates };
+
+      console.log("📋 Kurýr PO úpravě:", JSON.stringify(updated, null, 2));
+      console.log("💾 Ukládám do Supabase...");
 
       // Ulož do Supabase
       await updateCourier(updated);
       
-      console.log("✅ Uloženo do Supabase");
+      console.log("✅ Úspěšně uloženo do Supabase!");
 
       // Aktualizuj lokální stav
       setCouriersDB(prev => {
         const newState = prev.map(c => c.id === id ? updated : c);
-        console.log("✅ Lokální stav aktualizován");
+        console.log("✅ Lokální stav couriersDB aktualizován");
+        console.log("Počet kurýrů:", newState.length);
+        const updatedInState = newState.find(c => c.id === id);
+        console.log("Aktualizovaný kurýr v novém stavu:", JSON.stringify(updatedInState, null, 2));
         return newState;
       });
       
+      console.log("====================================");
+      console.log("✅ KONEC AKTUALIZACE - VŠE OK");
+      console.log("====================================");
+      
       alert("✅ Kurýr aktualizován");
     } catch (e) {
-      console.error("❌ Chyba při aktualizaci kurýra:", e);
+      console.error("====================================");
+      console.error("❌ CHYBA PŘI AKTUALIZACI KURÝRA");
+      console.error("Detail chyby:", e);
+      console.error("Stack trace:", e.stack);
+      console.error("====================================");
       alert("❌ Chyba při ukládání změn do cloudu: " + e.message);
     }
   }

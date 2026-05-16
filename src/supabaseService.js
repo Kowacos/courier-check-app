@@ -179,17 +179,24 @@ export async function updateCourier(courier) {
   }
   
   console.log("📝 Aktualizuji kurýra v Supabase:", courier.id);
-  const { error } = await supabase
+  console.log("📝 Data kurýra:", JSON.stringify(courier, null, 2));
+
+  const { data, error } = await supabase
     .from("couriers")
-    .update({ data: courier })
-    .eq("id", courier.id);
-    
+    .update({
+      data: courier,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", courier.id)
+    .select();
+
   if (error) {
     console.error("❌ Chyba při aktualizaci kurýra v Supabase:", error.message);
     console.error("Detail chyby:", error);
     throw error;
   } else {
     console.log("✅ Kurýr úspěšně aktualizován v Supabase");
+    console.log("✅ Vrácená data:", data);
   }
 }
 
