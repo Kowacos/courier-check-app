@@ -4,7 +4,7 @@ import {
   fetchCouriers, insertCourier, updateCourier, deleteCourier
 } from "./supabaseService";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, Camera, Image as ImageIcon, User, UserPlus, TrendingUp, Award } from "lucide-react";
+import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, Camera, Image as ImageIcon, User, UserPlus, TrendingUp, Award, Tag } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
 
 function Button({ children, className = "", variant = "default", size = "md", ...props }) {
@@ -51,6 +51,17 @@ const ACTION_OPTIONS = ["Bez opatření","Kurýr upozorněn","Kurýr proškolen"
 const UNIFORM_ITEMS = ["Triko","Košile","Kraťasy/Kalhoty","Vesta","Bunda"];
 const UNIFORM_SIZES = ["XS","S","M","L","XL","XXL","3XL"];
 const UNIFORM_PANTS_SIZES = ["30","32","34","36","38","40","42","44","46"];
+
+// Dostupné tagy pro kurýry
+const AVAILABLE_TAGS = [
+  { id: "novacek", label: "Nováček", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  { id: "top", label: "Top performer", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  { id: "problem", label: "Potřebuje pozornost", color: "bg-amber-100 text-amber-700 border-amber-200" },
+  { id: "training", label: "V tréninku", color: "bg-purple-100 text-purple-700 border-purple-200" },
+  { id: "experienced", label: "Zkušený", color: "bg-slate-100 text-slate-700 border-slate-200" },
+  { id: "temporary", label: "Brigádník", color: "bg-orange-100 text-orange-700 border-orange-200" },
+  { id: "returning", label: "Návrátilec", color: "bg-cyan-100 text-cyan-700 border-cyan-200" },
+];
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function formatDate(value) { if (!value) return ""; const [y, m, d] = value.split("-"); return `${d}. ${m}. ${y}`; }
@@ -2386,6 +2397,7 @@ function LeaderboardView({ savedInspections, couriersDB }) {
 function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCourier, onDeleteCourier, onShowAddModal, onShowEditModal }) {
   const [selectedCourier, setSelectedCourier] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTagFilter, setSelectedTagFilter] = useState(null);
 
   // Agregace historií kontrol pro každého kurýra
   const courierHistory = useMemo(() => {
@@ -2437,16 +2449,27 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
   }, [couriersDB, courierHistory]);
 
   const filteredCouriers = useMemo(() => {
-    if (!searchQuery.trim()) return enrichedCouriers;
-    const q = searchQuery.toLowerCase();
-    return enrichedCouriers.filter(c =>
-      c.name?.toLowerCase().includes(q) ||
-      c.phone?.toLowerCase().includes(q) ||
-      c.email?.toLowerCase().includes(q) ||
-      c.primaryRoute?.toLowerCase().includes(q) ||
-      c.primaryVehicle?.toLowerCase().includes(q)
-    );
-  }, [enrichedCouriers, searchQuery]);
+    let result = enrichedCouriers;
+    
+    // Filtr podle tagu
+    if (selectedTagFilter) {
+      result = result.filter(c => c.tags && c.tags.includes(selectedTagFilter));
+    }
+    
+    // Filtr podle vyhledávání
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(c =>
+        c.name?.toLowerCase().includes(q) ||
+        c.phone?.toLowerCase().includes(q) ||
+        c.email?.toLowerCase().includes(q) ||
+        c.primaryRoute?.toLowerCase().includes(q) ||
+        c.primaryVehicle?.toLowerCase().includes(q)
+      );
+    }
+    
+    return result;
+  }, [enrichedCouriers, searchQuery, selectedTagFilter]);
 
   if (couriersDB.length === 0 && savedInspections.length === 0) {
     return (
@@ -2523,6 +2546,22 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
                 <div className="text-xs font-medium text-slate-500">Hlavní vozidlo</div>
                 <div className="mt-0.5 font-medium">{courier.primaryVehicle || "—"}</div>
               </div>
+              {courier.tags && courier.tags.length > 0 && (
+                <div>
+                  <div className="text-xs font-medium text-slate-500 mb-2">Štítky</div>
+                  <div className="flex flex-wrap gap-1">
+                    {courier.tags.map(tagId => {
+                      const tag = AVAILABLE_TAGS.find(t => t.id === tagId);
+                      if (!tag) return null;
+                      return (
+                        <span key={tagId} className={`rounded-full border px-2 py-1 text-xs font-medium ${tag.color}`}>
+                          {tag.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2634,6 +2673,38 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
         />
       </div>
 
+      {/* Filtr podle tagů */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setSelectedTagFilter(null)}
+          className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+            !selectedTagFilter
+              ? "border-slate-950 bg-slate-950 text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          Všichni ({enrichedCouriers.length})
+        </button>
+        {AVAILABLE_TAGS.map(tag => {
+          const count = enrichedCouriers.filter(c => c.tags && c.tags.includes(tag.id)).length;
+          if (count === 0) return null;
+          
+          return (
+            <button
+              key={tag.id}
+              onClick={() => setSelectedTagFilter(tag.id === selectedTagFilter ? null : tag.id)}
+              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                selectedTagFilter === tag.id
+                  ? tag.color + " border-current"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {tag.label} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       {/* Seznam kurýrů */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredCouriers.map(courier => (
@@ -2658,6 +2729,22 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
               )}
             </div>
             <div className="font-bold text-lg mb-1">{courier.name}</div>
+
+            {/* Tagy */}
+            {courier.tags && courier.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {courier.tags.map(tagId => {
+                  const tag = AVAILABLE_TAGS.find(t => t.id === tagId);
+                  if (!tag) return null;
+                  return (
+                    <span key={tagId} className={`rounded-full border px-2 py-0.5 text-xs font-medium ${tag.color}`}>
+                      {tag.label}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="text-sm text-slate-500 space-y-1">
               {courier.primaryRoute && <div>🚚 {courier.primaryRoute}</div>}
               {courier.primaryVehicle && <div>🚗 {courier.primaryVehicle}</div>}
@@ -2868,6 +2955,21 @@ function SelectCouriersModal({ couriersDB, savedInspections, onSelect, onClose }
                             </span>
                           )}
                         </div>
+                        
+                        {/* Tagy */}
+                        {courier.tags && courier.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {courier.tags.map(tagId => {
+                              const tag = AVAILABLE_TAGS.find(t => t.id === tagId);
+                              if (!tag) return null;
+                              return (
+                                <span key={tagId} className={`rounded-full border px-2 py-0.5 text-xs font-medium ${tag.color}`}>
+                                  {tag.label}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
 
                         <div className="flex flex-wrap gap-2 text-sm text-slate-600 mb-2">
                           {courier.primaryRoute && (
@@ -2950,7 +3052,17 @@ function CourierEditModal({ courier, onSave, onClose }) {
     primaryRoute: courier?.primaryRoute || "",
     primaryVehicle: courier?.primaryVehicle || "",
     notes: courier?.notes || "",
+    tags: courier?.tags || [],
   });
+
+  function toggleTag(tagId) {
+    setFormData(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tagId)
+        ? prev.tags.filter(t => t !== tagId)
+        : [...prev.tags, tagId]
+    }));
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -3073,6 +3185,36 @@ function CourierEditModal({ courier, onSave, onClose }) {
                 placeholder="Např. pracuje jen ranní směny, potřebuje opakovaný trénink..."
               />
             </label>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                <Tag className="h-3.5 w-3.5" />
+                Štítky
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {AVAILABLE_TAGS.map(tag => {
+                  const isSelected = formData.tags.includes(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        isSelected
+                          ? tag.color + " border-current"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {isSelected && "✓ "}
+                      {tag.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Vyber štítky pro kategorizaci kurýra
+              </p>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">

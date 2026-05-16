@@ -62,3 +62,4 @@ ORDER BY created_at DESC;
 -- Nahraď 'uuid-here' za skutečné ID záznamu, který chceš smazat
 -- DELETE FROM couriers WHERE id = 'uuid-here';
 
+
