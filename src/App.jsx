@@ -3,6 +3,8 @@ import {
   fetchArchive, insertArchiveEntry, updateArchiveEntry, deleteArchiveEntry,
   fetchCouriers, insertCourier, updateCourier, deleteCourier
 } from "./supabaseService";
+import { toast } from "./toast";
+import { triggerConfetti } from "./confetti";
 import { motion, AnimatePresence } from "framer-motion";
 import { ClipboardCheck, FileText, Plus, Trash2, Save, RotateCcw, Search, CheckCircle2, XCircle, Printer, BarChart2, Archive, X, Shirt, PencilLine, Camera, Image as ImageIcon, User, UserPlus, TrendingUp, Award, Tag } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend } from "recharts";
@@ -42,6 +44,35 @@ const CHECKS = [
   { id: "uniform", title: "Uniforma", short: "Uniforma", description: "Kontrola předepsaného vzhledu a pracovního oblečení.", quickNotes: ["Chybí část uniformy","Nevhodné oblečení","Neupravený vzhled","Kurýr upozorněn","Nutná opakovaná kontrola"] },
   { id: "vehicleCondition", title: "Stav vozidla", short: "Stav vozidla", description: "Kontrola vizuálního a technického stavu vozidla.", quickNotes: ["Poškození karoserie","Problém se světly","Problém s pneumatikami","Chybějící výbava","Nutné nahlásit závadu"] },
 ];
+
+// Funkce pro detekci opakujících se problémů
+function detectRepeatingIssues(courierHistory) {
+  if (!courierHistory || courierHistory.length < 2) return [];
+
+  const recentInspections = courierHistory
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 3); // Poslední 3 kontroly
+
+  const warnings = [];
+
+  CHECKS.forEach(check => {
+    const failedInspections = recentInspections.filter(
+      insp => insp.checks?.[check.id]?.status !== "ok"
+    );
+
+    if (failedInspections.length >= 2) {
+      warnings.push({
+        checkId: check.id,
+        checkName: check.short,
+        count: failedInspections.length,
+        severity: failedInspections.length >= 3 ? "critical" : "warning",
+        lastDates: failedInspections.map(i => i.date)
+      });
+    }
+  });
+
+  return warnings;
+}
 
 const STATUS_OPTIONS = [
   { value: "ok", label: "Vyhovuje", icon: CheckCircle2, weight: 0 },
@@ -811,10 +842,17 @@ export default function CourierCheckApp() {
       });
       setActiveCourierId(null);
 
-      alert("✅ Kontrola uložena!");
+      // 🎉 Confetti pokud všichni kurýři vyhověli!
+      const allOk = saved.couriers.every(c => getCourierResult(c).tone === "ok");
+      if (allOk && saved.couriers.length > 0) {
+        triggerConfetti();
+        toast.success("🎉 PERFEKTNÍ KONTROLA! Všichni kurýři vyhověli!", 5000);
+      } else {
+        toast.success("✅ Kontrola uložena!", 4000);
+      }
     } catch (e) {
       console.error("❌ Chyba při ukládání:", e);
-      alert("❌ Chyba při ukládání. Zkontroluj konzoli (F12) pro detaily.");
+      toast.error("❌ Chyba při ukládání. Zkontroluj konzoli (F12) pro detaily.", 5000);
     } finally {
       setIsSaving(false);
     }
@@ -1026,10 +1064,10 @@ export default function CourierCheckApp() {
         localStorage.setItem(COURIERS_DB_KEY, JSON.stringify(couriersData));
       }
       
-      alert("✅ Data znovu načtena ze Supabase!");
+      toast.success("✅ Data znovu načtena ze Supabase!", 3000);
     } catch (e) {
       console.error("Chyba při načítání:", e);
-      alert("❌ Chyba při načítání dat ze Supabase");
+      toast.error("❌ Chyba při načítání dat ze Supabase", 4000);
     } finally {
       setIsLoading(false);
     }
@@ -1046,7 +1084,7 @@ export default function CourierCheckApp() {
   const addPhotoToCheck = (courierId, checkId, file) => {
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert("Fotka je příliš velká (max 5 MB)");
+      toast.warning("⚠️ Fotka je příliš velká (max 5 MB)", 3000);
       return;
     }
 
@@ -1087,15 +1125,49 @@ export default function CourierCheckApp() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950 text-white mx-auto animate-pulse">
-            <ClipboardCheck className="h-8 w-8" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold">Načítám data...</h2>
-            <p className="text-sm text-slate-500 mt-1">Synchronizace s cloudem</p>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="text-center space-y-6 max-w-md w-full">
+          {/* Animated logo */}
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.5 }}
+            className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-slate-900 to-slate-700 text-white mx-auto shadow-2xl"
+            style={{ boxShadow: '0 0 40px rgba(15, 23, 42, 0.3)' }}
+          >
+            <ClipboardCheck className="h-10 w-10" />
+          </motion.div>
+
+          {/* Title */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.2, duration: 0.5 }}
+          >
+            <h2 className="text-2xl font-bold gradient-text mb-2">Načítám data...</h2>
+            <p className="text-sm text-slate-600">Synchronizace s cloudem</p>
+          </motion.div>
+
+          {/* Skeleton cards */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.4, duration: 0.5 }}
+            className="space-y-3"
+          >
+            <div className="skeleton h-16 w-full"></div>
+            <div className="skeleton h-16 w-full"></div>
+            <div className="skeleton h-16 w-3/4 mx-auto"></div>
+          </motion.div>
+
+          {/* Loading bar */}
+          <motion.div
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: 1 }}
+            transition={{ delay: 0.6, duration: 1, repeat: Infinity }}
+            className="h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full mx-auto"
+            style={{ width: '60%', transformOrigin: 'left' }}
+          />
         </div>
       </div>
     );
@@ -1312,6 +1384,7 @@ export default function CourierCheckApp() {
           <DashboardView
             savedInspections={savedInspections}
             currentInspection={inspection}
+            couriersDB={couriersDB}
             onGoToCheck={() => setActiveTab("check")}
             onGoToHistory={() => setActiveTab("history")}
           />
@@ -1869,7 +1942,7 @@ function StatsView({ archive }) {
 }
 
 // ─── DASHBOARD VIEW ───────────────────────────────────────────────────────────
-function DashboardView({ savedInspections, currentInspection, onGoToCheck, onGoToHistory }) {
+function DashboardView({ savedInspections, currentInspection, onGoToCheck, onGoToHistory, couriersDB }) {
   const todayStats = useMemo(() => {
     const today = todayISO();
     const todayInspections = savedInspections.filter(insp => insp.date === today);
@@ -1898,6 +1971,40 @@ function DashboardView({ savedInspections, currentInspection, onGoToCheck, onGoT
       issues
     };
   }, [savedInspections]);
+
+  // Kurýři s opakujícími se problémy
+  const couriersWithRepeatingIssues = useMemo(() => {
+    if (!couriersDB || couriersDB.length === 0) return [];
+
+    const courierHistory = {};
+    savedInspections.forEach(insp => {
+      insp.couriers.forEach(c => {
+        const name = c.name?.trim() || "Bez jména";
+        if (!courierHistory[name]) courierHistory[name] = [];
+        courierHistory[name].push({
+          date: insp.date,
+          checks: c.checks,
+          result: getCourierResult(c)
+        });
+      });
+    });
+
+    const warnings = couriersDB.map(courier => {
+      const history = courierHistory[courier.name] || [];
+      const issues = detectRepeatingIssues(history);
+      return {
+        courier,
+        issues,
+        hasCritical: issues.some(i => i.severity === "critical")
+      };
+    }).filter(c => c.issues.length > 0);
+
+    return warnings.sort((a, b) => {
+      if (a.hasCritical && !b.hasCritical) return -1;
+      if (!a.hasCritical && b.hasCritical) return 1;
+      return b.issues.length - a.issues.length;
+    });
+  }, [savedInspections, couriersDB]);
 
   // Top kurýři s výhradami (poslední týden)
   const topCouriers = useMemo(() => {
@@ -1988,6 +2095,70 @@ function DashboardView({ savedInspections, currentInspection, onGoToCheck, onGoT
           </div>
         </div>
       </div>
+
+      {/* ⚠️ UPOZORNĚNÍ NA OPAKUJÍCÍ SE PROBLÉMY */}
+      {couriersWithRepeatingIssues.length > 0 && (
+        <div className={`rounded-3xl border-2 p-5 shadow-lg ${
+          couriersWithRepeatingIssues.some(c => c.hasCritical)
+            ? "border-rose-300 bg-rose-50"
+            : "border-amber-300 bg-amber-50"
+        }`}>
+          <h3 className="mb-4 text-lg font-bold flex items-center gap-2">
+            {couriersWithRepeatingIssues.some(c => c.hasCritical) ? "🚨" : "⚠️"}
+            <span className={couriersWithRepeatingIssues.some(c => c.hasCritical) ? "text-rose-900" : "text-amber-900"}>
+              Kurýři s opakujícími se problémy {couriersWithRepeatingIssues.length > 0 && `(${couriersWithRepeatingIssues.length})`}
+            </span>
+          </h3>
+          <div className="space-y-2">
+            {couriersWithRepeatingIssues.slice(0, 5).map((item, idx) => (
+              <div
+                key={idx}
+                className={`rounded-xl border-2 bg-white p-4 ${
+                  item.hasCritical ? "border-rose-400" : "border-amber-400"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1">
+                    <div className="font-bold text-lg">{item.courier.name}</div>
+                    <div className="text-xs text-slate-600 mt-0.5">
+                      {item.courier.primaryRoute && `🚚 ${item.courier.primaryRoute}`}
+                      {item.courier.primaryVehicle && ` · 🚗 ${item.courier.primaryVehicle}`}
+                    </div>
+                  </div>
+                  {item.hasCritical && (
+                    <span className="shrink-0 rounded-full bg-rose-600 text-white px-3 py-1 text-xs font-bold">
+                      KRITICKÉ
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {item.issues.map((issue, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-2 text-sm ${
+                        issue.severity === "critical" ? "font-bold text-rose-900" : "font-semibold text-amber-900"
+                      }`}
+                    >
+                      <span>{issue.severity === "critical" ? "🔴" : "🟡"}</span>
+                      <span>{issue.checkName}: {issue.count}× po sobě</span>
+                    </div>
+                  ))}
+                </div>
+                {item.hasCritical && (
+                  <div className="mt-3 rounded-lg bg-rose-100 border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-900">
+                    💡 Doporučujeme: Okamžité přeškolení + kontrola každý den po dobu 1 týdne
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {couriersWithRepeatingIssues.length > 5 && (
+            <div className="mt-3 text-center text-sm font-semibold text-slate-600">
+              ... a dalších {couriersWithRepeatingIssues.length - 5} kurýrů
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Top kurýři s výhradami */}
       {topCouriers.length > 0 && (
@@ -2556,13 +2727,20 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
 
   // Spojení kartotéky s historií kontrol
   const enrichedCouriers = useMemo(() => {
-    return couriersDB.map(courier => ({
-      ...courier,
-      history: courierHistory[courier.name] || { totalInspections: 0, totalIssues: 0, history: [] },
-      issueRate: courierHistory[courier.name]?.totalInspections > 0
-        ? Math.round((courierHistory[courier.name].totalIssues / courierHistory[courier.name].totalInspections) * 100)
-        : 0
-    }));
+    return couriersDB.map(courier => {
+      const history = courierHistory[courier.name] || { totalInspections: 0, totalIssues: 0, history: [] };
+      const repeatingIssues = detectRepeatingIssues(history.history);
+
+      return {
+        ...courier,
+        history,
+        issueRate: history.totalInspections > 0
+          ? Math.round((history.totalIssues / history.totalInspections) * 100)
+          : 0,
+        repeatingIssues, // Nová vlastnost s upozorněními
+        hasWarnings: repeatingIssues.length > 0
+      };
+    });
   }, [couriersDB, courierHistory]);
 
   const filteredCouriers = useMemo(() => {
@@ -2640,6 +2818,62 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
             </Button>
           </div>
         </div>
+
+        {/* ⚠️ UPOZORNĚNÍ NA OPAKUJÍCÍ SE PROBLÉMY */}
+        {courier.repeatingIssues && courier.repeatingIssues.length > 0 && (
+          <div className={`rounded-3xl border p-5 shadow-sm ${
+            courier.repeatingIssues.some(i => i.severity === "critical")
+              ? "border-rose-300 bg-rose-50"
+              : "border-amber-300 bg-amber-50"
+          }`}>
+            <h3 className="mb-3 flex items-center gap-2 font-bold text-lg">
+              {courier.repeatingIssues.some(i => i.severity === "critical") ? "🚨" : "⚠️"}
+              <span className={courier.repeatingIssues.some(i => i.severity === "critical") ? "text-rose-900" : "text-amber-900"}>
+                Upozornění - Opakující se problémy
+              </span>
+            </h3>
+            <div className="space-y-2">
+              {courier.repeatingIssues.map((issue, idx) => (
+                <div
+                  key={idx}
+                  className={`rounded-xl border p-3 ${
+                    issue.severity === "critical"
+                      ? "border-rose-400 bg-white"
+                      : "border-amber-400 bg-white"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="font-bold text-sm mb-1">
+                        {issue.checkName}
+                      </div>
+                      <div className={`text-xs ${
+                        issue.severity === "critical" ? "text-rose-700" : "text-amber-700"
+                      }`}>
+                        Nevyhověl {issue.count}× v posledních {issue.count} kontrolách
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Poslední kontroly: {issue.lastDates.map(d => formatDate(d)).join(", ")}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${
+                      issue.severity === "critical"
+                        ? "bg-rose-600 text-white"
+                        : "bg-amber-600 text-white"
+                    }`}>
+                      {issue.severity === "critical" ? "KRITICKÉ" : "POZOR"}
+                    </span>
+                  </div>
+                  {issue.severity === "critical" && (
+                    <div className="mt-2 rounded-lg bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-900">
+                      💡 Doporučení: Přeškolení + opakovaná kontrola za 3-7 dní
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Profil kurýra */}
         <div className="grid gap-4 lg:grid-cols-3">
@@ -2824,11 +3058,14 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
 
       {/* Seznam kurýrů */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {filteredCouriers.map(courier => (
-          <button
+        {filteredCouriers.map((courier, idx) => (
+          <motion.button
             key={courier.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.05, duration: 0.3 }}
             onClick={() => setSelectedCourier(courier.id)}
-            className="rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm hover:border-slate-950 hover:shadow-lg transition active:scale-95"
+            className="rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm hover:border-slate-950 hover:shadow-xl transition-all duration-300 active:scale-95 hover-glow"
           >
             <div className="mb-3 flex items-start justify-between">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
@@ -2846,6 +3083,27 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
               )}
             </div>
             <div className="font-bold text-lg mb-1">{courier.name}</div>
+
+            {/* ⚠️ UPOZORNĚNÍ NA OPAKUJÍCÍ SE PROBLÉMY */}
+            {courier.repeatingIssues && courier.repeatingIssues.length > 0 && (
+              <div className="mb-2">
+                {courier.repeatingIssues.map((issue, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-semibold mb-1 ${
+                      issue.severity === "critical"
+                        ? "border-rose-300 bg-rose-50 text-rose-700"
+                        : "border-amber-300 bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    <span>{issue.severity === "critical" ? "🚨" : "⚠️"}</span>
+                    <span className="flex-1">
+                      {issue.checkName}: {issue.count}× po sobě
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Tagy */}
             {courier.tags && courier.tags.length > 0 && (
@@ -2882,7 +3140,7 @@ function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCour
                 )}
               </div>
             )}
-          </button>
+          </motion.button>
         ))}
       </div>
 
@@ -3184,7 +3442,7 @@ function CourierEditModal({ courier, onSave, onClose }) {
   function handleSubmit(e) {
     e.preventDefault();
     if (!formData.name.trim()) {
-      alert("Vyplň jméno kurýra");
+      toast.warning("⚠️ Vyplň jméno kurýra", 3000);
       return;
     }
     onSave(formData);
