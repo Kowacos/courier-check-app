@@ -60,7 +60,8 @@
   }
 }
 
-.animate-shimmer {
+/* Skeleton loading - vlastní třída místo utility */
+.skeleton {
   background: linear-gradient(
     90deg,
     #f1f5f9 0%,
@@ -70,22 +71,7 @@
   );
   background-size: 1000px 100%;
   animation: shimmer 2s infinite linear;
-}
-
-.animate-bounce-in {
-  animation: bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
-
-.animate-slide-up {
-  animation: slide-up 0.4s ease-out;
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s infinite;
-}
-
-.skeleton {
-  @apply animate-shimmer rounded-2xl;
+  border-radius: 1rem;
   min-height: 20px;
 }
 
