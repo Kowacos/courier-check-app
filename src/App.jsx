@@ -2023,6 +2023,7 @@ function DashboardView({ savedInspections, currentInspection, onGoToCheck, onGoT
     });
 
     return Object.values(courierMap)
+      .filter(c => c.issues > 0)  // ✅ Zobraz JEN kurýry s alespoň 1 výhradou
       .sort((a, b) => b.issues - a.issues)
       .slice(0, 5);
   }, [savedInspections]);

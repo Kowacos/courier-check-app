@@ -1,4 +1,4 @@
-const CACHE_NAME = 'courier-check-v1';
+const CACHE_NAME = 'courier-check-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -22,7 +22,15 @@ self.addEventListener('install', (event) => {
         console.error('❌ Chyba při cachování:', error);
       })
   );
-  self.skipWaiting();
+  // Neprovádíme skipWaiting automaticky - čekáme na potvrzení uživatele
+});
+
+// Message handler - pro SKIP_WAITING od klienta
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    console.log('✅ Klient potvrdil aktualizaci - aktivuji nový Service Worker');
+    self.skipWaiting();
+  }
 });
 
 // Aktivace - smazání starých cache
@@ -126,4 +134,6 @@ async function syncOfflineData() {
   // Zde bude logika pro synchronizaci offline změn
   console.log('📡 Synchronizuji offline data...');
 }
+
+
 
