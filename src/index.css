@@ -13,6 +13,59 @@
   --glow-error: 0 0 20px rgba(239, 68, 68, 0.4);
 }
 
+/* 📱 PWA & Touch Optimalizace */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html {
+  /* Prevent bounce scroll na iOS */
+  overscroll-behavior-y: none;
+  /* iOS safe areas */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+body {
+  /* iOS smooth scroll */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent text selection on double tap */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Scrollbars pro tablets */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Touch targets - minimálně 44x44px pro iPady */
+button, a, input, select, textarea {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Text je selectable jen kde potřeba */
+input, textarea, [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* ✨ Animace */
 @keyframes shimmer {
   0% { background-position: -1000px 0; }
@@ -57,6 +110,17 @@
   100% {
     transform: translateY(100vh) rotate(720deg);
     opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
   }
 }
 
@@ -107,3 +171,34 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* 📱 Tablet & Mobile Optimalizace */
+@media (max-width: 768px) {
+  /* Větší touch targets */
+  button, a {
+    min-height: 48px;
+    padding: 12px 16px;
+  }
+
+  /* Větší fonty pro lepší čitelnost */
+  html {
+    font-size: 16px;
+  }
+}
+
+/* iPad Pro & Tablet landscape */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  /* Optimalizace pro landscape tablet */
+  .grid {
+    gap: 1.5rem;
+  }
+}
+
+/* iPads v portrait mode */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+  /* 2-column layout pro portrait tablet */
+  .lg\:grid-cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
