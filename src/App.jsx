@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchArchive, insertArchiveEntry, updateArchiveEntry, deleteArchiveEntry,
-  fetchCouriers, insertCourier, updateCourier, deleteCourier
+  fetchCouriers, insertCourier,
+  updateCourier as updateCourierInSupabase,
+  deleteCourier as deleteCourierFromSupabase
 } from "./supabaseService";
 import { toast } from "./toast";
 import { triggerConfetti } from "./confetti";
@@ -796,7 +798,7 @@ export default function CourierCheckApp() {
   }
 
   function updateCourierInInspection(id, fn) { setInspection(cur => ({ ...cur, couriers: cur.couriers.map(c => c.id === id ? fn(c) : c) })); }
-  function deleteCourier(id) { setInspection(cur => ({ ...cur, couriers: cur.couriers.filter(c => c.id !== id) })); if (activeCourierId === id) setActiveCourierId(null); }
+  function deleteCourierFromInspection(id) { setInspection(cur => ({ ...cur, couriers: cur.couriers.filter(c => c.id !== id) })); if (activeCourierId === id) setActiveCourierId(null); }
 
   // Uložit aktuální kontrolu
   async function saveInspection() {
@@ -954,8 +956,8 @@ export default function CourierCheckApp() {
       console.log("💾 Ukládám do Supabase...");
 
       // Ulož do Supabase
-      await updateCourier(updated);
-      
+      await updateCourierInSupabase(updated);
+
       console.log("✅ Úspěšně uloženo do Supabase!");
 
       // Aktualizuj lokální stav
@@ -1017,7 +1019,7 @@ export default function CourierCheckApp() {
       console.log("🗑️ Mažu kurýra:", id);
 
       // Smaž z Supabase
-      await deleteCourier(id);
+      await deleteCourierFromSupabase(id);
 
       // Aktualizuj lokální stav
       setCouriersDB(prev => {
@@ -1394,8 +1396,6 @@ export default function CourierCheckApp() {
           <CouriersView
             savedInspections={savedInspections}
             couriersDB={couriersDB}
-            onAddCourier={addCourierToDB}
-            onUpdateCourier={updateCourierInDB}
             onDeleteCourier={deleteCourierFromDB}
             onShowAddModal={() => { setShowCourierModal(true); setEditingCourierData(null); }}
             onShowEditModal={(courier) => { setShowCourierModal(true); setEditingCourierData(courier); }}
@@ -1473,7 +1473,7 @@ export default function CourierCheckApp() {
               ? <CourierEditor
                   courier={activeCourier}
                   updateCourier={updateCourierInInspection}
-                  deleteCourier={deleteCourier}
+                  deleteCourier={deleteCourierFromInspection}
                   addQuickNote={addQuickNote}
                   addPhotoToCheck={addPhotoToCheck}
                   deletePhoto={deletePhoto}
@@ -2683,7 +2683,7 @@ function LeaderboardView({ savedInspections, couriersDB }) {
 }
 
 // ─── COURIERS VIEW ────────────────────────────────────────────────────────────
-function CouriersView({ savedInspections, couriersDB, onAddCourier, onUpdateCourier, onDeleteCourier, onShowAddModal, onShowEditModal }) {
+function CouriersView({ savedInspections, couriersDB, onDeleteCourier, onShowAddModal, onShowEditModal }) {
   const [selectedCourier, setSelectedCourier] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTagFilter, setSelectedTagFilter] = useState(null);
