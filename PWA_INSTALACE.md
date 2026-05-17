@@ -126,5 +126,5 @@ npm run build && npm run preview
 
 ---
 
-**Vytvořeno s ❤️ pro DPD**
+**Vytvořeno s ❤️ pro UPS**
 
